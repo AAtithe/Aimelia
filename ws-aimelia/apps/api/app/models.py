@@ -66,3 +66,16 @@ class UserToken(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class KnowledgeChunk(Base):
+    """Knowledge base chunks with vector embeddings for RAG."""
+    __tablename__ = "kb_chunks"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source = Column(String, nullable=False)  # 'email', 'meeting', 'document', 'policy'
+    source_id = Column(String, nullable=True)  # email_id, meeting_id, doc_id
+    title = Column(String, nullable=False)
+    chunk = Column(Text, nullable=False)
+    embedding = Column(Text, nullable=True)  # JSON string of embedding vector
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())

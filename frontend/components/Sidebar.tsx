@@ -6,10 +6,11 @@ import {
   FileText, 
   BarChart3, 
   Settings,
-  Bot
+  Bot,
+  Brain
 } from 'lucide-react'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai'
 
 interface SidebarProps {
   activeTab: TabType
@@ -22,6 +23,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'calendar', label: 'Calendar', icon: Calendar, color: 'text-green-600' },
     { id: 'briefs', label: 'Meeting Briefs', icon: FileText, color: 'text-purple-600' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, color: 'text-orange-600' },
+    { id: 'ai', label: 'Enhanced AI', icon: Brain, color: 'text-indigo-600' },
   ]
 
   return (

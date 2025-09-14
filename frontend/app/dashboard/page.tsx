@@ -8,9 +8,10 @@ import { EmailTriage } from '@/components/EmailTriage'
 import { CalendarView } from '@/components/CalendarView'
 import { MeetingBriefs } from '@/components/MeetingBriefs'
 import { Analytics } from '@/components/Analytics'
+import { EnhancedAI } from '@/components/EnhancedAI'
 import toast from 'react-hot-toast'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai'
 
 export default function Dashboard() {
   const { isAuthenticated, logout } = useAuth()
@@ -23,6 +24,7 @@ export default function Dashboard() {
     upcomingMeetings: 0,
     briefsGenerated: 0
   })
+  const [showEnhancedAI, setShowEnhancedAI] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -63,6 +65,25 @@ export default function Dashboard() {
         return <MeetingBriefs onRefresh={loadDashboardData} />
       case 'analytics':
         return <Analytics stats={stats} />
+      case 'ai':
+        return (
+          <div className="text-center py-12">
+            <div className="max-w-md mx-auto">
+              <div className="text-6xl mb-4">🧠</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Enhanced AI Features</h2>
+              <p className="text-gray-600 mb-6">
+                Access context-aware AI features including intelligent email triage, 
+                persona-driven drafts, and knowledge base search.
+              </p>
+              <button
+                onClick={() => setShowEnhancedAI(true)}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Open Enhanced AI
+              </button>
+            </div>
+          </div>
+        )
       default:
         return <EmailTriage onRefresh={loadDashboardData} />
     }
@@ -90,6 +111,10 @@ export default function Dashboard() {
           </main>
         </div>
       </div>
+
+      {showEnhancedAI && (
+        <EnhancedAI onClose={() => setShowEnhancedAI(false)} />
+      )}
     </div>
   )
 }

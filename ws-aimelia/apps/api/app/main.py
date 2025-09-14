@@ -2,12 +2,41 @@ from fastapi import FastAPI
 from .graph_auth import router as auth_router
 from .outlook import router as email_router
 from .calendar import router as cal_router
+from .enhanced_endpoints import router as enhanced_router
 
-app = FastAPI(title="Aimelia API")
-app.include_router(auth_router)
-app.include_router(email_router)
-app.include_router(cal_router)
+app = FastAPI(
+    title="Aimelia API",
+    description="AI-powered personal assistant for Williams, Stanley & Co",
+    version="2.0.0"
+)
+
+# Include all routers
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+app.include_router(email_router, prefix="/emails", tags=["Email Management"])
+app.include_router(cal_router, prefix="/calendar", tags=["Calendar Management"])
+app.include_router(enhanced_router, prefix="/ai", tags=["Enhanced AI Features"])
 
 @app.get("/")
 def root():
-    return {"aimelia": "ok"}
+    return {
+        "aimelia": "ok",
+        "version": "2.0.0",
+        "features": [
+            "Microsoft Graph Integration",
+            "AI-Powered Email Triage",
+            "Context-Aware Meeting Briefs",
+            "Knowledge Base (RAG)",
+            "Persona-Driven Responses",
+            "Few-Shot Learning"
+        ]
+    }
+
+@app.get("/health")
+async def health_check():
+    """Enhanced health check endpoint."""
+    from .enhanced_endpoints import enhanced_health_check
+    from .db import get_db
+    from fastapi import Depends
+    
+    db = next(get_db())
+    return await enhanced_health_check(db)
