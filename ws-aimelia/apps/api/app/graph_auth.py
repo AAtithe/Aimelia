@@ -258,7 +258,11 @@ async def get_token(db: Session = Depends(get_db)):
     """Get a valid access token for the authenticated user."""
     access_token = await token_manager.get_valid_access_token(db, "tom")
     if access_token:
-        return {"status": "ok", "has_token": True}
+        return {
+            "status": "ok", 
+            "has_token": True,
+            "access_token": access_token
+        }
     else:
         return {"status": "error", "message": "No valid token available. Please re-authenticate."}
 

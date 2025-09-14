@@ -41,6 +41,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://aimelia-api.onrender.com'
 
@@ -53,13 +54,32 @@ export function Providers({ children }: { children: React.ReactNode }) {
     try {
       const response = await fetch(`${apiBaseUrl}/auth/token`)
       if (response.ok) {
-        setIsAuthenticated(true)
-        // You might want to fetch user details here
+        const data = await response.json()
+        if (data.status === 'ok' && data.has_token) {
+          setIsAuthenticated(true)
+          if (data.access_token) {
+            setAccessToken(data.access_token)
+          }
+        }
       }
     } catch (error) {
       console.log('Not authenticated')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const getAccessToken = async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/token`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.access_token) {
+          setAccessToken(data.access_token)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to get access token:', error)
     }
   }
 
@@ -80,10 +100,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   const makeRequest = async (endpoint: string, options: RequestInit = {}) => {
     const url = `${apiBaseUrl}${endpoint}`
+    
+    // Get fresh access token if we don't have one
+    if (!accessToken && isAuthenticated) {
+      await getAccessToken()
+    }
+    
     const response = await fetch(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         ...options.headers,
       },
     })
