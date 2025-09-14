@@ -1,10 +1,12 @@
-import httpx, base64, os
+import httpx, base64, os, logging
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from .settings import settings
 from .db import get_db
 from .token_manager import token_manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -96,7 +98,9 @@ async def callback(request: Request, code: str | None = None, error: str | None 
             tokens = tok.json()
         
         # Store encrypted tokens in database
+        logger.info(f"Attempting to store tokens for user 'tom'")
         success = await token_manager.store_tokens(db, "tom", tokens)
+        logger.info(f"Token storage result: {success}")
         
         if success:
             # Return a beautiful HTML success page
