@@ -39,9 +39,32 @@ async def login():
     return RedirectResponse(url=f"{auth_urls()['authorize']}?{urlencode(params)}")
 
 @router.get("/callback")
-async def callback(request: Request, code: str | None = None, db: Session = Depends(get_db)):
+async def callback(request: Request, code: str | None = None, error: str | None = None, error_description: str | None = None, db: Session = Depends(get_db)):
+    # Handle authentication errors
+    if error:
+        error_messages = {
+            "access_denied": "User declined to consent to access the app. Please try again and accept the permissions.",
+            "invalid_request": "Invalid authentication request. Please try again.",
+            "unauthorized_client": "Client authentication failed. Please contact support.",
+            "unsupported_response_type": "Unsupported response type. Please contact support.",
+            "invalid_scope": "Invalid scope requested. Please contact support.",
+            "server_error": "Authentication server error. Please try again later.",
+            "temporarily_unavailable": "Authentication service temporarily unavailable. Please try again later."
+        }
+        
+        user_message = error_messages.get(error, f"Authentication error: {error}")
+        if error_description:
+            user_message += f" Details: {error_description}"
+        
+        return {
+            "error": error,
+            "error_description": error_description,
+            "message": user_message,
+            "status": "error"
+        }
+    
     if not code:
-        return {"error": "no_code"}
+        return {"error": "no_code", "message": "No authorization code received. Please try logging in again."}
     
     data = {
         "client_id": settings.CLIENT_ID,

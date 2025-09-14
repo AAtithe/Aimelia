@@ -17,7 +17,13 @@ class TokenManager:
     """Manages Microsoft Graph tokens with encryption and auto-refresh."""
     
     def __init__(self):
-        self.fernet = Fernet(settings.ENCRYPTION_KEY.encode())
+        # Initialize Fernet only if encryption key is available
+        if settings.ENCRYPTION_KEY:
+            self.fernet = Fernet(settings.ENCRYPTION_KEY.encode())
+        else:
+            self.fernet = None
+            logger.warning("ENCRYPTION_KEY not set. Token encryption disabled.")
+        
         self.tenant_id = settings.TENANT_ID
         self.client_id = settings.CLIENT_ID
         self.client_secret = settings.CLIENT_SECRET
@@ -26,11 +32,20 @@ class TokenManager:
     
     def _encrypt_token(self, token: str) -> str:
         """Encrypt a token using Fernet."""
-        return self.fernet.encrypt(token.encode()).decode()
+        if self.fernet:
+            return self.fernet.encrypt(token.encode()).decode()
+        else:
+            # Fallback: store token in plain text if encryption is disabled
+            logger.warning("Storing token without encryption (ENCRYPTION_KEY not set)")
+            return token
     
     def _decrypt_token(self, encrypted_token: str) -> str:
         """Decrypt a token using Fernet."""
-        return self.fernet.decrypt(encrypted_token.encode()).decode()
+        if self.fernet:
+            return self.fernet.decrypt(encrypted_token.encode()).decode()
+        else:
+            # Fallback: return token as-is if encryption is disabled
+            return encrypted_token
     
     async def store_tokens(self, db: Session, user_id: str, tokens: Dict[str, Any]) -> bool:
         """
