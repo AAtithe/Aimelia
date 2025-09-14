@@ -9,10 +9,11 @@ import {
   Bot,
   Brain,
   PenTool,
-  Star
+  Star,
+  Zap
 } from 'lucide-react'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep' | 'automation'
 
 interface SidebarProps {
   activeTab: TabType
@@ -28,6 +29,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'ai', label: 'Enhanced AI', icon: Brain, color: 'text-indigo-600' },
     { id: 'drafting', label: 'Smart Drafting', icon: PenTool, color: 'text-emerald-600' },
     { id: 'prep', label: 'Meeting Prep', icon: Star, color: 'text-yellow-600' },
+    { id: 'automation', label: 'Automation', icon: Zap, color: 'text-purple-600' },
   ]
 
   return (

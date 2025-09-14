@@ -11,9 +11,10 @@ import { Analytics } from '@/components/Analytics'
 import { EnhancedAI } from '@/components/EnhancedAI'
 import { SmartDrafting } from '@/components/SmartDrafting'
 import { MeetingPrep } from '@/components/MeetingPrep'
+import { SchedulerControl } from '@/components/SchedulerControl'
 import toast from 'react-hot-toast'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep' | 'automation'
 
 export default function Dashboard() {
   const { isAuthenticated, logout } = useAuth()
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [showEnhancedAI, setShowEnhancedAI] = useState(false)
   const [showSmartDrafting, setShowSmartDrafting] = useState(false)
   const [showMeetingPrep, setShowMeetingPrep] = useState(false)
+  const [showSchedulerControl, setShowSchedulerControl] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -126,6 +128,25 @@ export default function Dashboard() {
             </div>
           </div>
         )
+      case 'automation':
+        return (
+          <div className="text-center py-12">
+            <div className="max-w-md mx-auto">
+              <div className="text-6xl mb-4">🤖</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Background Automation</h2>
+              <p className="text-gray-600 mb-6">
+                Control Aimelia's background automation. Make her feel alive with 
+                hourly email triage, meeting briefs, and daily digests.
+              </p>
+              <button
+                onClick={() => setShowSchedulerControl(true)}
+                className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Control Automation
+              </button>
+            </div>
+          </div>
+        )
       default:
         return <EmailTriage onRefresh={loadDashboardData} />
     }
@@ -164,6 +185,10 @@ export default function Dashboard() {
 
       {showMeetingPrep && (
         <MeetingPrep onClose={() => setShowMeetingPrep(false)} />
+      )}
+
+      {showSchedulerControl && (
+        <SchedulerControl onClose={() => setShowSchedulerControl(false)} />
       )}
     </div>
   )

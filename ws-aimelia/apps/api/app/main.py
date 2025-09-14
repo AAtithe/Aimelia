@@ -5,6 +5,7 @@ from .calendar import router as cal_router
 from .simple_enhanced import router as enhanced_router
 from .smart_drafting_endpoints import router as drafting_router
 from .meeting_prep_endpoints import router as prep_router
+from .scheduler_endpoints import router as scheduler_router
 
 app = FastAPI(
     title="Aimelia API",
@@ -19,6 +20,7 @@ app.include_router(cal_router, tags=["Calendar Management"])
 app.include_router(enhanced_router, prefix="/ai", tags=["Enhanced AI Features"])
 app.include_router(drafting_router, prefix="/draft", tags=["Smart Drafting"])
 app.include_router(prep_router, prefix="/prep", tags=["Meeting Preparation"])
+app.include_router(scheduler_router, prefix="/scheduler", tags=["Background Automation"])
 
 @app.get("/")
 def root():
@@ -35,7 +37,9 @@ def root():
             "Smart Email Drafting",
             "Automatic Reply Generation",
             "Meeting Preparation",
-            "Star-Level Meeting Briefs"
+            "Star-Level Meeting Briefs",
+            "Background Automation",
+            "Proactive AI Assistant"
         ]
     }
 

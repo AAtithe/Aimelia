@@ -8,3 +8,4 @@ requests==2.31.0
 cryptography==41.0.7
 openai>=1.0.0
 pgvector==0.2.4
+apscheduler==3.10.4
