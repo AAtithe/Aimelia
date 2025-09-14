@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .graph_auth import router as auth_router
 from .outlook import router as email_router
 from .calendar import router as cal_router
@@ -13,6 +14,20 @@ app = FastAPI(
     title="Aimelia API",
     description="AI-powered personal assistant for Williams, Stanley & Co",
     version="2.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://aimelia.vercel.app",
+        "https://aimelia-git-main-williams-stanley.vercel.app",
+        "https://aimelia-g9vho0hsv-williams-stanley.vercel.app",
+        "http://localhost:3000",  # For local development
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 # Include all routers
