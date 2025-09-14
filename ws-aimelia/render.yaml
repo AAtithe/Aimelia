@@ -2,7 +2,7 @@ services:
   - type: web
     name: aimelia-api
     env: python
-    rootDir: ws-aimelia/apps/api
+    rootDir: apps/api
     buildCommand: "pip install -e ."
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
@@ -28,7 +28,7 @@ services:
   - type: worker
     name: aimelia-jobs
     env: python
-    rootDir: ws-aimelia/apps/api
+    rootDir: apps/api
     buildCommand: "pip install -e ."
     startCommand: "python -m app.scheduler"
     envVars:
