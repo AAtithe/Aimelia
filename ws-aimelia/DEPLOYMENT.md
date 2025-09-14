@@ -72,7 +72,7 @@ In Render dashboard, add these environment variables:
 DATABASE_URL=<will be set automatically>
 TENANT_ID=0cf82021-6ddc-4fae-987a-d29ef04d571a
 CLIENT_ID=880818f6-a9af-43ea-9c12-1813bcecce89
-CLIENT_SECRET=-cm8Q~MhnYA601zflBkoSm-c0WJPMvx_FBlijaCv
+CLIENT_SECRET=<your-client-secret>
 GRAPH_REDIRECT_URI=https://aimelia-api.onrender.com/auth/callback
 APP_BASE_URL=https://aimelia-api.onrender.com
 TIMEZONE=Europe/London

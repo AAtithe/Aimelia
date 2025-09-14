@@ -8,7 +8,7 @@
 ## Azure AD App Configuration
 - **Application ID**: 880818f6-a9af-43ea-9c12-1813bcecce89
 - **Tenant ID**: 0cf82021-6ddc-4fae-987a-d29ef04d571a
-- **Client Secret**: -cm8Q~MhnYA601zflBkoSm-c0WJPMvx_FBlijaCv
+- **Client Secret**: `[Set in environment variables]`
 - **Display Name**: Aimelia
 - **Account Types**: My organization only
 
