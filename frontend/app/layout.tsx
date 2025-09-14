@@ -11,6 +11,7 @@ export const metadata: Metadata = {
   description: 'AI-powered personal assistant for Microsoft 365 with intelligent email triage, meeting briefs, and smart automation.',
   keywords: 'AI, personal assistant, Microsoft 365, email triage, meeting briefs, productivity',
   authors: [{ name: 'Aimelia Team' }],
+  // Force refresh
 }
 
 export const viewport = {
