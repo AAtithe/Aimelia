@@ -15,6 +15,7 @@ dependencies = [
   "httpx",
   "itsdangerous",
   "cryptography",
+  "openai>=1.0.0",
 ]
 
 [tool.uvicorn]

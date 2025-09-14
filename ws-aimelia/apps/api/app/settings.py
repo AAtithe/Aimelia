@@ -9,5 +9,6 @@ class Settings(BaseSettings):
     GRAPH_REDIRECT_URI: str
     APP_BASE_URL: str
     TIMEZONE: str = "Europe/London"
+    ENCRYPTION_KEY: str  # Fernet encryption key for token storage
 
 settings = Settings()

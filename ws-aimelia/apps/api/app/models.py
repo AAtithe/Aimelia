@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, JSON, TIMESTAMP, Integer, ForeignKey, Text
+from sqlalchemy import Column, String, JSON, TIMESTAMP, Integer, ForeignKey, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 import uuid
@@ -56,3 +56,13 @@ class Note(Base):
     text = Column(Text)
     action_items = Column(JSON)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+class UserToken(Base):
+    __tablename__ = "user_tokens"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String, unique=True, nullable=False)  # "tom" for now
+    encrypted_access_token = Column(Text, nullable=False)
+    encrypted_refresh_token = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
