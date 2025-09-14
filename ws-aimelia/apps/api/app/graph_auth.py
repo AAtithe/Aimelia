@@ -72,11 +72,26 @@ async def callback(request: Request, code: str | None = None, error: str | None 
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": settings.GRAPH_REDIRECT_URI,
+        "scope": " ".join(SCOPES),
     }
     
     try:
         async with httpx.AsyncClient() as client:
             tok = await client.post(auth_urls()["token"], data=data)
+            
+            if tok.status_code == 401:
+                error_detail = tok.text
+                return {
+                    "error": "unauthorized",
+                    "message": f"Authentication failed: {tok.status_code} {tok.reason_phrase}",
+                    "details": error_detail,
+                    "debug_info": {
+                        "client_id": settings.CLIENT_ID,
+                        "redirect_uri": settings.GRAPH_REDIRECT_URI,
+                        "scope": " ".join(SCOPES)
+                    }
+                }
+            
             tok.raise_for_status()
             tokens = tok.json()
         
