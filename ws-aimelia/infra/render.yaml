@@ -15,7 +15,7 @@ services:
       - key: CLIENT_ID
         value: 880818f6-a9af-43ea-9c12-1813bcecce89
       - key: CLIENT_SECRET
-        value: -cm8Q~MhnYA601zflBkoSm-c0WJPMvx_FBlijaCv
+        sync: false
       - key: GRAPH_REDIRECT_URI
         value: https://aimelia-api.onrender.com/auth/callback
       - key: OPENAI_API_KEY
@@ -41,7 +41,7 @@ services:
       - key: CLIENT_ID
         value: 880818f6-a9af-43ea-9c12-1813bcecce89
       - key: CLIENT_SECRET
-        value: -cm8Q~MhnYA601zflBkoSm-c0WJPMvx_FBlijaCv
+        sync: false
       - key: TIMEZONE
         value: Europe/London
 databases:
