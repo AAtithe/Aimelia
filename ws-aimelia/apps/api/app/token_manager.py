@@ -33,7 +33,11 @@ class TokenManager:
     def _encrypt_token(self, token: str) -> str:
         """Encrypt a token using Fernet."""
         if self.fernet:
-            return self.fernet.encrypt(token.encode()).decode()
+            try:
+                return self.fernet.encrypt(token.encode()).decode()
+            except Exception as e:
+                logger.error(f"Encryption failed: {e}")
+                return token  # Fallback to plain text
         else:
             # Fallback: store token in plain text if encryption is disabled
             logger.warning("Storing token without encryption (ENCRYPTION_KEY not set)")
@@ -96,6 +100,8 @@ class TokenManager:
             
         except Exception as e:
             logger.error(f"Failed to store tokens for user {user_id}: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception details: {str(e)}")
             db.rollback()
             return False
     
