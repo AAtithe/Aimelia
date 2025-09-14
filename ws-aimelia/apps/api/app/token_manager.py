@@ -64,8 +64,9 @@ class TokenManager:
             refresh_token = tokens["refresh_token"]
             expires_in = tokens.get("expires_in", 3600)  # Default to 1 hour
             
-            # Calculate expiration time
-            expires_at = datetime.utcnow() + timedelta(seconds=expires_in - 300)  # 5 min buffer
+            # Calculate expiration time (ensure it's always in the future)
+            buffer_seconds = min(300, expires_in // 2)  # Use 5 min buffer or half the token lifetime, whichever is smaller
+            expires_at = datetime.utcnow() + timedelta(seconds=expires_in - buffer_seconds)
             
             # Encrypt tokens
             encrypted_access = self._encrypt_token(access_token)
@@ -117,8 +118,12 @@ class TokenManager:
                 return None
             
             # Check if token is still valid (with 5 minute buffer)
-            if token_record.expires_at > datetime.utcnow():
+            current_time = datetime.utcnow()
+            logger.info(f"Token expires at: {token_record.expires_at}, current time: {current_time}")
+            
+            if token_record.expires_at > current_time:
                 # Token is still valid, decrypt and return
+                logger.info(f"Token is still valid, returning decrypted token")
                 return self._decrypt_token(token_record.encrypted_access_token)
             
             # Token expired, try to refresh
