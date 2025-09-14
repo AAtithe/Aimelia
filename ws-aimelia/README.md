@@ -22,11 +22,35 @@ uvicorn app.main:app --reload
 
 Open http://localhost:8000/auth/login to connect your Microsoft account.
 
-Deploy
-	•	Push to GitHub, connect repo in Render (web + worker), set env vars.
-	•	Set GRAPH_REDIRECT_URI to your Render URL /auth/callback.
+## Deploy
 
-Next steps
+### 🚀 Quick Deploy Options
+
+**Option 1: Render (Recommended - Full Stack)**
+```bash
+# 1. Push to GitHub
+git add . && git commit -m "Initial commit" && git push
+
+# 2. Go to render.com, connect GitHub repo
+# 3. Deploy using infra/render.yaml (Blueprint deployment)
+# 4. Update Azure AD redirect URI to: https://aimelia-api.onrender.com/auth/callback
+```
+
+**Option 2: Vercel (Serverless API)**
+```bash
+# 1. Install Vercel CLI
+npm i -g vercel
+
+# 2. Deploy
+vercel --prod
+
+# 3. Set environment variables in Vercel dashboard
+# 4. Update Azure AD redirect URI to your Vercel URL
+```
+
+📖 **Detailed deployment guide**: See [DEPLOYMENT.md](./DEPLOYMENT.md)
+
+## Next Steps
 	•	Persist/refresh tokens in DB (encrypt at rest).
 	•	Implement LLM prompts for triage + briefs.
 	•	Add Teams bot endpoints for commands (book, brief, triage).
