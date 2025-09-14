@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "apps/api/app/main.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "15mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "apps/api/app/main.py"
+    }
+  ],
+  "env": {
+    "TENANT_ID": "@tenant_id",
+    "CLIENT_ID": "@client_id", 
+    "CLIENT_SECRET": "@client_secret",
+    "GRAPH_REDIRECT_URI": "@graph_redirect_uri",
+    "APP_BASE_URL": "@app_base_url",
+    "TIMEZONE": "Europe/London"
+  }
+}
