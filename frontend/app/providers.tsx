@@ -47,12 +47,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   // Check authentication status on mount
   useEffect(() => {
-    checkAuthStatus()
+    // Add a small delay to ensure any redirects have completed
+    const timer = setTimeout(() => {
+      checkAuthStatus()
+    }, 1000)
+    
+    return () => clearTimeout(timer)
   }, [])
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = async (retryCount = 0) => {
     try {
-      console.log('Checking authentication status...')
+      console.log(`Checking authentication status... (attempt ${retryCount + 1})`)
       const response = await fetch(`${apiBaseUrl}/auth/token`)
       console.log('Auth response status:', response.status)
       
@@ -69,6 +74,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
           }
         } else {
           console.log('User not authenticated:', data.message)
+          // Retry once more after a delay if this is the first attempt
+          if (retryCount === 0) {
+            console.log('Retrying authentication check in 2 seconds...')
+            setTimeout(() => checkAuthStatus(1), 2000)
+            return
+          }
         }
       } else {
         console.log('Auth check failed with status:', response.status)
@@ -76,7 +87,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.log('Auth check error:', error)
     } finally {
-      setLoading(false)
+      if (retryCount > 0) {
+        setLoading(false)
+      }
     }
   }
 
