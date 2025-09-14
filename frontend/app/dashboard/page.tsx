@@ -9,9 +9,10 @@ import { CalendarView } from '@/components/CalendarView'
 import { MeetingBriefs } from '@/components/MeetingBriefs'
 import { Analytics } from '@/components/Analytics'
 import { EnhancedAI } from '@/components/EnhancedAI'
+import { SmartDrafting } from '@/components/SmartDrafting'
 import toast from 'react-hot-toast'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting'
 
 export default function Dashboard() {
   const { isAuthenticated, logout } = useAuth()
@@ -25,6 +26,7 @@ export default function Dashboard() {
     briefsGenerated: 0
   })
   const [showEnhancedAI, setShowEnhancedAI] = useState(false)
+  const [showSmartDrafting, setShowSmartDrafting] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -84,6 +86,25 @@ export default function Dashboard() {
             </div>
           </div>
         )
+      case 'drafting':
+        return (
+          <div className="text-center py-12">
+            <div className="max-w-md mx-auto">
+              <div className="text-6xl mb-4">✍️</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Smart Email Drafting</h2>
+              <p className="text-gray-600 mb-6">
+                Automatically draft Outlook replies in Tom Stanley's tone. 
+                UK English, decisive, hospitality-savvy, 120-180 words.
+              </p>
+              <button
+                onClick={() => setShowSmartDrafting(true)}
+                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Open Smart Drafting
+              </button>
+            </div>
+          </div>
+        )
       default:
         return <EmailTriage onRefresh={loadDashboardData} />
     }
@@ -114,6 +135,10 @@ export default function Dashboard() {
 
       {showEnhancedAI && (
         <EnhancedAI onClose={() => setShowEnhancedAI(false)} />
+      )}
+
+      {showSmartDrafting && (
+        <SmartDrafting onClose={() => setShowSmartDrafting(false)} />
       )}
     </div>
   )

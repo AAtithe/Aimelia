@@ -3,6 +3,7 @@ from .graph_auth import router as auth_router
 from .outlook import router as email_router
 from .calendar import router as cal_router
 from .simple_enhanced import router as enhanced_router
+from .smart_drafting_endpoints import router as drafting_router
 
 app = FastAPI(
     title="Aimelia API",
@@ -15,6 +16,7 @@ app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(email_router, prefix="/emails", tags=["Email Management"])
 app.include_router(cal_router, prefix="/calendar", tags=["Calendar Management"])
 app.include_router(enhanced_router, prefix="/ai", tags=["Enhanced AI Features"])
+app.include_router(drafting_router, prefix="/draft", tags=["Smart Drafting"])
 
 @app.get("/")
 def root():
@@ -27,7 +29,9 @@ def root():
             "Context-Aware Meeting Briefs",
             "Knowledge Base (RAG)",
             "Persona-Driven Responses",
-            "Few-Shot Learning"
+            "Few-Shot Learning",
+            "Smart Email Drafting",
+            "Automatic Reply Generation"
         ]
     }
 

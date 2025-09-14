@@ -7,10 +7,11 @@ import {
   BarChart3, 
   Settings,
   Bot,
-  Brain
+  Brain,
+  PenTool
 } from 'lucide-react'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting'
 
 interface SidebarProps {
   activeTab: TabType
@@ -24,6 +25,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'briefs', label: 'Meeting Briefs', icon: FileText, color: 'text-purple-600' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, color: 'text-orange-600' },
     { id: 'ai', label: 'Enhanced AI', icon: Brain, color: 'text-indigo-600' },
+    { id: 'drafting', label: 'Smart Drafting', icon: PenTool, color: 'text-emerald-600' },
   ]
 
   return (
