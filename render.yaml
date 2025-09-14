@@ -49,4 +49,9 @@ services:
         value: Europe/London
 databases:
   - name: aimelia-db
-    plan: starter
+    plan: basic-1gb
+    diskSizeGB: 15
+    postgresMajorVersion: "16"
+    databaseName: aimelia
+    user: aimelia_user
+    ipAllowList: []
