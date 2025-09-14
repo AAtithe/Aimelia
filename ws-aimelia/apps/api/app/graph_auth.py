@@ -42,6 +42,7 @@ async def login():
 
 @router.get("/callback")
 async def callback(request: Request, code: str | None = None, error: str | None = None, error_description: str | None = None, db: Session = Depends(get_db)):
+    logger.info(f"Callback received - code: {code is not None}, error: {error}")
     # Handle authentication errors
     if error:
         error_messages = {
@@ -99,8 +100,12 @@ async def callback(request: Request, code: str | None = None, error: str | None 
         
         # Store encrypted tokens in database
         logger.info(f"Attempting to store tokens for user 'tom'")
+        logger.info(f"Tokens received: {list(tokens.keys())}")
         success = await token_manager.store_tokens(db, "tom", tokens)
         logger.info(f"Token storage result: {success}")
+        
+        if not success:
+            logger.error("Token storage failed - this will cause authentication to fail")
         
         if success:
             # Direct redirect to dashboard - no success page needed
@@ -113,6 +118,11 @@ async def callback(request: Request, code: str | None = None, error: str | None 
             }
     except Exception as e:
         return {"status": "error", "message": f"Authentication failed: {str(e)}"}
+
+@router.get("/test-callback")
+async def test_callback():
+    """Test endpoint to verify callback is working."""
+    return {"status": "ok", "message": "Callback endpoint is working"}
 
 @router.get("/token")
 async def get_token(db: Session = Depends(get_db)):
