@@ -10,7 +10,7 @@ dependencies = [
   "pydantic-settings",
   "python-dotenv",
   "sqlalchemy>=2",
-  "psycopg[binary]",
+  "psycopg2-binary",
   "apscheduler",
   "httpx",
   "itsdangerous",
