@@ -34,7 +34,7 @@ export function EnhancedAI({ onClose }: EnhancedAIProps) {
   const [briefData, setBriefData] = useState({
     event: {
       subject: '',
-      attendees: [],
+      attendees: [] as Array<{ emailAddress: { address: string } }>,
       start: { dateTime: '' }
     },
     recent_emails: []
