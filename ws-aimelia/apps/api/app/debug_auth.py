@@ -90,6 +90,33 @@ async def clear_tokens(db: Session = Depends(get_db)):
             "message": f"Failed to clear tokens: {str(e)}"
         }
 
+@router.post("/debug/test-token-storage")
+async def test_token_storage(db: Session = Depends(get_db)):
+    """Test token storage with dummy data."""
+    try:
+        from .token_manager import token_manager
+        
+        # Create dummy tokens
+        dummy_tokens = {
+            "access_token": "test_access_token_12345",
+            "refresh_token": "test_refresh_token_67890",
+            "expires_in": 3600
+        }
+        
+        # Try to store them
+        success = await token_manager.store_tokens(db, "test_user", dummy_tokens)
+        
+        return {
+            "status": "ok" if success else "error",
+            "storage_success": success,
+            "message": "Token storage test completed"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Token storage test failed: {str(e)}"
+        }
+
 @router.get("/debug/check-token")
 async def check_token_details(db: Session = Depends(get_db)):
     """Check detailed token information."""
