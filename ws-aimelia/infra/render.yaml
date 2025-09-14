@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: aimelia-api
+    env: python
+    rootDir: apps/api
+    buildCommand: "pip install -e ."
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aimelia-db
+          property: connectionString
+      - key: TENANT_ID
+      - key: CLIENT_ID
+      - key: CLIENT_SECRET
+      - key: GRAPH_REDIRECT_URI
+      - key: OPENAI_API_KEY
+      - key: APP_BASE_URL
+      - key: TIMEZONE
+  - type: worker
+    name: aimelia-jobs
+    env: python
+    rootDir: apps/api
+    buildCommand: "pip install -e ."
+    startCommand: "python -m app.scheduler"
+databases:
+  - name: aimelia-db
+    plan: starter
