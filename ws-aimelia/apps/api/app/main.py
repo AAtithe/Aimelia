@@ -13,9 +13,9 @@ app = FastAPI(
 )
 
 # Include all routers
-app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-app.include_router(email_router, prefix="/emails", tags=["Email Management"])
-app.include_router(cal_router, prefix="/calendar", tags=["Calendar Management"])
+app.include_router(auth_router, tags=["Authentication"])
+app.include_router(email_router, tags=["Email Management"])
+app.include_router(cal_router, tags=["Calendar Management"])
 app.include_router(enhanced_router, prefix="/ai", tags=["Enhanced AI Features"])
 app.include_router(drafting_router, prefix="/draft", tags=["Smart Drafting"])
 app.include_router(prep_router, prefix="/prep", tags=["Meeting Preparation"])
