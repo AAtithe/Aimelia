@@ -38,6 +38,41 @@ export default function Dashboard() {
     }
   }, [isAuthenticated])
 
+  // Show login prompt if not authenticated
+  if (!isAuthenticated && !loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="w-20 h-20 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full mx-auto mb-6 flex items-center justify-center">
+            <span className="text-white text-2xl">🤖</span>
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">Welcome to Aimelia</h1>
+          <p className="text-gray-600 mb-8">
+            Your AI-powered personal assistant for Williams, Stanley & Co
+          </p>
+          <button
+            onClick={() => window.location.href = 'https://aimelia-api.onrender.com/auth/login'}
+            className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-8 rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 transform hover:scale-105"
+          >
+            Sign in with Microsoft 365
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading Aimelia...</p>
+        </div>
+      </div>
+    )
+  }
+
   const loadDashboardData = async () => {
     setLoading(true)
     try {
