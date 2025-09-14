@@ -1,0 +1,1 @@
+# Placeholder: send daily/weekly digests to Teams via Bot Framework or Graph
