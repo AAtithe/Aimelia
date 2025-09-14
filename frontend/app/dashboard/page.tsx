@@ -10,9 +10,10 @@ import { MeetingBriefs } from '@/components/MeetingBriefs'
 import { Analytics } from '@/components/Analytics'
 import { EnhancedAI } from '@/components/EnhancedAI'
 import { SmartDrafting } from '@/components/SmartDrafting'
+import { MeetingPrep } from '@/components/MeetingPrep'
 import toast from 'react-hot-toast'
 
-type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting'
+type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep'
 
 export default function Dashboard() {
   const { isAuthenticated, logout } = useAuth()
@@ -27,6 +28,7 @@ export default function Dashboard() {
   })
   const [showEnhancedAI, setShowEnhancedAI] = useState(false)
   const [showSmartDrafting, setShowSmartDrafting] = useState(false)
+  const [showMeetingPrep, setShowMeetingPrep] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -105,6 +107,25 @@ export default function Dashboard() {
             </div>
           </div>
         )
+      case 'prep':
+        return (
+          <div className="text-center py-12">
+            <div className="max-w-md mx-auto">
+              <div className="text-6xl mb-4">🌟</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Meeting Preparation</h2>
+              <p className="text-gray-600 mb-6">
+                Get star-level preparation for your meetings. Comprehensive briefs with 
+                talking points, risks, and next steps.
+              </p>
+              <button
+                onClick={() => setShowMeetingPrep(true)}
+                className="bg-yellow-600 text-white px-6 py-3 rounded-lg hover:bg-yellow-700 transition-colors"
+              >
+                Prep Me Like a Star
+              </button>
+            </div>
+          </div>
+        )
       default:
         return <EmailTriage onRefresh={loadDashboardData} />
     }
@@ -139,6 +160,10 @@ export default function Dashboard() {
 
       {showSmartDrafting && (
         <SmartDrafting onClose={() => setShowSmartDrafting(false)} />
+      )}
+
+      {showMeetingPrep && (
+        <MeetingPrep onClose={() => setShowMeetingPrep(false)} />
       )}
     </div>
   )
