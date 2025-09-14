@@ -84,35 +84,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }
 
   const login = () => {
-    // Open login in a popup window
-    const popup = window.open(
-      `${apiBaseUrl}/auth/login`,
-      'aimelia-auth',
-      'width=500,height=600,scrollbars=yes,resizable=yes'
-    )
-    
-    // Listen for the success message from the popup
-    const messageHandler = (event: MessageEvent) => {
-      if (event.origin !== apiBaseUrl) return
-      
-      if (event.data.type === 'AUTH_SUCCESS') {
-        popup?.close()
-        window.removeEventListener('message', messageHandler)
-        // Refresh the page to check auth status
-        window.location.reload()
-      }
-    }
-    
-    window.addEventListener('message', messageHandler)
-    
-    // Fallback: check auth status every 2 seconds if popup is closed
-    const checkInterval = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(checkInterval)
-        window.removeEventListener('message', messageHandler)
-        checkAuthStatus()
-      }
-    }, 2000)
+    // Simple redirect approach - let the callback handle the redirect
+    window.location.href = `${apiBaseUrl}/auth/login`
   }
 
   const logout = async () => {

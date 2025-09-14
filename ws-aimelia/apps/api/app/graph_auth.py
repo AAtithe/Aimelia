@@ -108,16 +108,11 @@ async def callback(request: Request, code: str | None = None, error: str | None 
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Aimelia - Authentication Successful</title>
                 <script>
-                    // Close the popup window and notify parent
-                    if (window.opener) {
-                        window.opener.postMessage({ type: 'AUTH_SUCCESS', status: 'ok' }, '*');
-                        window.close();
-                    } else {
-                        // If not in popup, redirect to dashboard
-                        setTimeout(() => {
-                            window.location.href = 'https://aimelia.vercel.app/dashboard';
-                        }, 2000);
-                    }
+                    // Always redirect to dashboard after successful authentication
+                    console.log('Authentication successful, redirecting to dashboard...');
+                    setTimeout(() => {
+                        window.location.href = 'https://aimelia.vercel.app/dashboard';
+                    }, 1000);
                 </script>
                 <style>
                     body {
