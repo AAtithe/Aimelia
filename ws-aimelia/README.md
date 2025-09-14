@@ -5,12 +5,19 @@
 - Postgres (Render)
 - Python 3.12
 
+## Azure AD App Configuration
+- **Application ID**: 880818f6-a9af-43ea-9c12-1813bcecce89
+- **Tenant ID**: 0cf82021-6ddc-4fae-987a-d29ef04d571a
+- **Client Secret**: -cm8Q~MhnYA601zflBkoSm-c0WJPMvx_FBlijaCv
+- **Display Name**: Aimelia
+- **Account Types**: My organization only
+
 ## Local
 ```bash
 cd apps/api
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
-export $(grep -v '^#' ../../.env.example | xargs)  # then edit values
+export $(grep -v '^#' ../../.env | xargs)  # loads Azure AD credentials
 uvicorn app.main:app --reload
 
 Open http://localhost:8000/auth/login to connect your Microsoft account.
