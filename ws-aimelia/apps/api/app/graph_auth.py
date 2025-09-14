@@ -1,6 +1,6 @@
 import httpx, base64, os
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from .settings import settings
 from .db import get_db
@@ -98,11 +98,158 @@ async def callback(request: Request, code: str | None = None, error: str | None 
         # Store encrypted tokens in database
         success = await token_manager.store_tokens(db, "tom", tokens)
         
-        return {
-            "status": "ok" if success else "error",
-            "tokens_saved": success,
-            "message": "Tokens stored securely" if success else "Failed to store tokens"
-        }
+        if success:
+            # Return a beautiful HTML success page
+            html_content = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Aimelia - Authentication Successful</title>
+                <script>
+                    // Close the popup window and notify parent
+                    if (window.opener) {
+                        window.opener.postMessage({ type: 'AUTH_SUCCESS', status: 'ok' }, '*');
+                        window.close();
+                    } else {
+                        // If not in popup, redirect to dashboard
+                        setTimeout(() => {
+                            window.location.href = 'https://aimelia.vercel.app/dashboard';
+                        }, 2000);
+                    }
+                </script>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        margin: 0;
+                        padding: 0;
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+                    .container {
+                        background: white;
+                        border-radius: 20px;
+                        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                        padding: 3rem;
+                        text-align: center;
+                        max-width: 500px;
+                        width: 90%;
+                    }
+                    .success-icon {
+                        width: 80px;
+                        height: 80px;
+                        background: linear-gradient(135deg, #10b981, #3b82f6);
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 2rem;
+                        animation: pulse 2s infinite;
+                    }
+                    .success-icon svg {
+                        width: 40px;
+                        height: 40px;
+                        color: white;
+                    }
+                    h1 {
+                        color: #1f2937;
+                        font-size: 2.5rem;
+                        font-weight: 700;
+                        margin-bottom: 1rem;
+                    }
+                    .subtitle {
+                        color: #6b7280;
+                        font-size: 1.2rem;
+                        margin-bottom: 2rem;
+                    }
+                    .features {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 1rem;
+                        margin: 2rem 0;
+                    }
+                    .feature {
+                        background: #f8fafc;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 12px;
+                        padding: 1rem;
+                        text-align: center;
+                    }
+                    .feature-icon {
+                        font-size: 2rem;
+                        margin-bottom: 0.5rem;
+                    }
+                    .feature-title {
+                        font-weight: 600;
+                        color: #374151;
+                        margin-bottom: 0.25rem;
+                    }
+                    .feature-desc {
+                        font-size: 0.875rem;
+                        color: #6b7280;
+                    }
+                    .redirect-message {
+                        color: #6b7280;
+                        margin-top: 2rem;
+                        font-size: 0.9rem;
+                    }
+                    @keyframes pulse {
+                        0%, 100% { transform: scale(1); }
+                        50% { transform: scale(1.05); }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </div>
+                    <h1>Welcome to Aimelia!</h1>
+                    <p class="subtitle">Your AI-powered personal assistant is now ready</p>
+                    
+                    <div class="features">
+                        <div class="feature">
+                            <div class="feature-icon">📧</div>
+                            <div class="feature-title">Smart Email Triage</div>
+                            <div class="feature-desc">AI-powered processing</div>
+                        </div>
+                        <div class="feature">
+                            <div class="feature-icon">📅</div>
+                            <div class="feature-title">Meeting Prep</div>
+                            <div class="feature-desc">Star-level briefs</div>
+                        </div>
+                        <div class="feature">
+                            <div class="feature-icon">🤖</div>
+                            <div class="feature-title">Background Automation</div>
+                            <div class="feature-desc">Always working for you</div>
+                        </div>
+                        <div class="feature">
+                            <div class="feature-icon">🧠</div>
+                            <div class="feature-title">AI Intelligence</div>
+                            <div class="feature-desc">Context-aware responses</div>
+                        </div>
+                    </div>
+                    
+                    <p class="redirect-message">
+                        Redirecting to your dashboard...
+                    </p>
+                </div>
+            </body>
+            </html>
+            """
+            return HTMLResponse(content=html_content)
+        else:
+            return {
+                "status": "error",
+                "tokens_saved": False,
+                "message": "Failed to store tokens"
+            }
     except Exception as e:
         return {"status": "error", "message": f"Authentication failed: {str(e)}"}
 
