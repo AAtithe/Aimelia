@@ -1,8 +1,10 @@
 """
 Debug authentication configuration
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 from .settings import settings
+from .db import get_db
 
 router = APIRouter()
 
@@ -32,3 +34,37 @@ async def debug_auth_config():
             "Client ID might be incorrect"
         ]
     }
+
+@router.get("/debug/token-status")
+async def debug_token_status(db: Session = Depends(get_db)):
+    """Debug endpoint to check token status in database."""
+    try:
+        from .models import UserToken
+        from datetime import datetime
+        
+        token_record = db.query(UserToken).filter(UserToken.user_id == "tom").first()
+        if not token_record:
+            return {
+                "status": "error",
+                "message": "No token record found for user 'tom'",
+                "token_exists": False
+            }
+        
+        current_time = datetime.utcnow()
+        is_expired = token_record.expires_at < current_time
+        
+        return {
+            "status": "ok",
+            "token_exists": True,
+            "expires_at": token_record.expires_at.isoformat(),
+            "current_time": current_time.isoformat(),
+            "is_expired": is_expired,
+            "time_until_expiry": (token_record.expires_at - current_time).total_seconds() if not is_expired else 0,
+            "has_access_token": bool(token_record.encrypted_access_token),
+            "has_refresh_token": bool(token_record.encrypted_refresh_token)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to check token status: {str(e)}"
+        }
