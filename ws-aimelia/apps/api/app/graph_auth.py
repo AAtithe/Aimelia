@@ -110,9 +110,13 @@ async def callback(request: Request, code: str | None = None, error: str | None 
                 <script>
                     // Always redirect to dashboard after successful authentication
                     console.log('Authentication successful, redirecting to dashboard...');
+                    
+                    // Wait a bit longer to ensure token is stored
                     setTimeout(() => {
-                        window.location.href = 'https://aimelia.vercel.app/dashboard';
-                    }, 1000);
+                        console.log('Redirecting to dashboard now...');
+                        // Force a hard redirect to clear any cached state
+                        window.location.replace('https://aimelia.vercel.app/dashboard');
+                    }, 3000);
                 </script>
                 <style>
                     body {

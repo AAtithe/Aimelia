@@ -52,18 +52,29 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   const checkAuthStatus = async () => {
     try {
+      console.log('Checking authentication status...')
       const response = await fetch(`${apiBaseUrl}/auth/token`)
+      console.log('Auth response status:', response.status)
+      
       if (response.ok) {
         const data = await response.json()
+        console.log('Auth response data:', data)
+        
         if (data.status === 'ok' && data.has_token) {
+          console.log('User is authenticated!')
           setIsAuthenticated(true)
           if (data.access_token) {
             setAccessToken(data.access_token)
+            console.log('Access token set')
           }
+        } else {
+          console.log('User not authenticated:', data.message)
         }
+      } else {
+        console.log('Auth check failed with status:', response.status)
       }
     } catch (error) {
-      console.log('Not authenticated')
+      console.log('Auth check error:', error)
     } finally {
       setLoading(false)
     }
