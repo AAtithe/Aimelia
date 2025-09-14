@@ -89,3 +89,31 @@ async def clear_tokens(db: Session = Depends(get_db)):
             "status": "error",
             "message": f"Failed to clear tokens: {str(e)}"
         }
+
+@router.get("/debug/check-token")
+async def check_token_details(db: Session = Depends(get_db)):
+    """Check detailed token information."""
+    try:
+        from .models import UserToken
+        from datetime import datetime
+        
+        token_record = db.query(UserToken).filter(UserToken.user_id == "tom").first()
+        if not token_record:
+            return {"status": "error", "message": "No token found"}
+        
+        current_time = datetime.utcnow()
+        is_expired = token_record.expires_at < current_time
+        
+        return {
+            "status": "ok",
+            "user_id": token_record.user_id,
+            "expires_at": token_record.expires_at.isoformat(),
+            "current_time": current_time.isoformat(),
+            "is_expired": is_expired,
+            "has_access_token": bool(token_record.encrypted_access_token),
+            "has_refresh_token": bool(token_record.encrypted_refresh_token),
+            "access_token_length": len(token_record.encrypted_access_token) if token_record.encrypted_access_token else 0,
+            "refresh_token_length": len(token_record.encrypted_refresh_token) if token_record.encrypted_refresh_token else 0
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to check token: {str(e)}"}
