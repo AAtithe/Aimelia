@@ -10,7 +10,7 @@ from sqlalchemy.sql import func as sql_func
 import uuid
 from datetime import datetime
 from .db import Base, get_db
-from .ai_service import ai_service
+# Removed circular import - ai_service will be imported when needed
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,13 @@ class KnowledgeRetriever:
     async def embed_text(self, text: str) -> List[float]:
         """Generate embedding for text using OpenAI."""
         try:
+            # Import ai_service here to avoid circular import
+            from .ai_service import ai_service
+            
+            if not ai_service.client:
+                logger.error("OpenAI client not available")
+                return []
+                
             response = await ai_service.client.embeddings.create(
                 model=self.embedding_model,
                 input=text

@@ -6,7 +6,7 @@ Now enhanced with context-aware generation using persona and knowledge base.
 import openai
 from typing import List, Dict, Any, Optional
 from .settings import settings
-from .context_builder import context_builder
+# Removed circular import - context_builder will be imported when needed
 import logging
 import json
 
@@ -230,6 +230,8 @@ class AIService:
             }
             
             query = f"{sender} {subject} {body[:100]}"
+            # Import context_builder here to avoid circular import
+            from .context_builder import context_builder
             messages = await context_builder.build_context("reply", meta, query)
             
             response = await self.client.chat.completions.create(
@@ -275,6 +277,8 @@ class AIService:
             }
             
             query = f"{subject} {' '.join(attendees)} meeting brief"
+            # Import context_builder here to avoid circular import
+            from .context_builder import context_builder
             messages = await context_builder.build_context("brief", meta, query)
             
             response = await self.client.chat.completions.create(
@@ -319,6 +323,8 @@ class AIService:
             }
             
             query = f"{sender} {subject} {body[:100]}"
+            # Import context_builder here to avoid circular import
+            from .context_builder import context_builder
             messages = await context_builder.build_context("triage", meta, query)
             
             response = await self.client.chat.completions.create(

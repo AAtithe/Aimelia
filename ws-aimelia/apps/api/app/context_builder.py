@@ -6,7 +6,7 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from .knowledge_base import knowledge_retriever
+# Removed circular import - knowledge_retriever will be imported when needed
 from .fewshots import FewShotManager
 from .db import get_db
 import logging
@@ -51,6 +51,8 @@ Be concise, use UK spelling, and focus on hospitality sector expertise. Never au
             
             # 2. Retrieve relevant knowledge
             db = next(get_db())
+            # Import knowledge_retriever here to avoid circular import
+            from .knowledge_base import knowledge_retriever
             knowledge_chunks = await knowledge_retriever.retrieve_chunks(
                 db, query, top_k
             )
