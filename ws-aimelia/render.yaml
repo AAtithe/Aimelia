@@ -2,6 +2,7 @@ services:
   - type: web
     name: aimelia-api
     env: python
+    plan: starter
     rootDir: apps/api
     buildCommand: "pip install -e ."
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
@@ -19,6 +20,7 @@ services:
       - key: GRAPH_REDIRECT_URI
         value: https://aimelia-api.onrender.com/auth/callback
       - key: OPENAI_API_KEY
+        sync: false
       - key: APP_BASE_URL
         value: https://aimelia-api.onrender.com
       - key: TIMEZONE
@@ -28,6 +30,7 @@ services:
   - type: worker
     name: aimelia-jobs
     env: python
+    plan: starter
     rootDir: apps/api
     buildCommand: "pip install -e ."
     startCommand: "python -m app.scheduler"
