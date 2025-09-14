@@ -68,3 +68,24 @@ async def debug_token_status(db: Session = Depends(get_db)):
             "status": "error",
             "message": f"Failed to check token status: {str(e)}"
         }
+
+@router.post("/debug/clear-tokens")
+async def clear_tokens(db: Session = Depends(get_db)):
+    """Clear all stored tokens to force re-authentication."""
+    try:
+        from .models import UserToken
+        
+        # Delete all tokens for user 'tom'
+        deleted_count = db.query(UserToken).filter(UserToken.user_id == "tom").delete()
+        db.commit()
+        
+        return {
+            "status": "ok",
+            "message": f"Cleared {deleted_count} token records for user 'tom'",
+            "tokens_deleted": deleted_count
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to clear tokens: {str(e)}"
+        }
