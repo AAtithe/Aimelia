@@ -7,6 +7,7 @@ from .smart_drafting_endpoints import router as drafting_router
 from .meeting_prep_endpoints import router as prep_router
 from .scheduler_endpoints import router as scheduler_router
 from .debug_auth import router as debug_router
+from .setup import router as setup_router
 
 app = FastAPI(
     title="Aimelia API",
@@ -23,6 +24,7 @@ app.include_router(drafting_router, prefix="/draft", tags=["Smart Drafting"])
 app.include_router(prep_router, prefix="/prep", tags=["Meeting Preparation"])
 app.include_router(scheduler_router, prefix="/scheduler", tags=["Background Automation"])
 app.include_router(debug_router, tags=["Debug"])
+app.include_router(setup_router, prefix="/setup", tags=["Database Setup"])
 
 @app.get("/")
 def root():
