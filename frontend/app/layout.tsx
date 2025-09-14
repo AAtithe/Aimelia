@@ -11,7 +11,11 @@ export const metadata: Metadata = {
   description: 'AI-powered personal assistant for Microsoft 365 with intelligent email triage, meeting briefs, and smart automation.',
   keywords: 'AI, personal assistant, Microsoft 365, email triage, meeting briefs, productivity',
   authors: [{ name: 'Aimelia Team' }],
-  viewport: 'width=device-width, initial-scale=1',
+}
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({
