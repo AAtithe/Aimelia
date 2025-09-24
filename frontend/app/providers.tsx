@@ -47,10 +47,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   // Check authentication status on mount
   useEffect(() => {
-    // Add a small delay to ensure any redirects have completed
+    // Check if we just returned from authentication
+    const urlParams = new URLSearchParams(window.location.search)
+    const fromAuth = urlParams.has('code') || document.referrer.includes('login.microsoftonline.com')
+    
+    // If we just returned from auth, check immediately, otherwise add small delay
     const timer = setTimeout(() => {
       checkAuthStatus()
-    }, 1000)
+    }, fromAuth ? 100 : 1000)
     
     return () => clearTimeout(timer)
   }, [])
@@ -74,6 +78,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           }
         } else {
           console.log('User not authenticated:', data.message)
+          setIsAuthenticated(false)
           // Retry once more after a delay if this is the first attempt
           if (retryCount === 0) {
             console.log('Retrying authentication check in 2 seconds...')
@@ -83,13 +88,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
         }
       } else {
         console.log('Auth check failed with status:', response.status)
+        setIsAuthenticated(false)
       }
     } catch (error) {
       console.log('Auth check error:', error)
+      setIsAuthenticated(false)
     } finally {
-      if (retryCount > 0) {
-        setLoading(false)
-      }
+      // Always set loading to false after the check completes
+      setLoading(false)
     }
   }
 

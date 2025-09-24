@@ -113,9 +113,9 @@ async def callback(request: Request, code: str | None = None, error: str | None 
             logger.error("Token storage failed - this will cause authentication to fail")
         
         if success:
-            # Direct redirect to dashboard - no success page needed
-            logger.info("Redirecting to dashboard")
-            return RedirectResponse(url="https://aimelia.vercel.app/dashboard")
+            # Redirect to main page, frontend will detect authentication status
+            logger.info("Redirecting to main page")
+            return RedirectResponse(url="https://aimelia.vercel.app/")
         else:
             return {
                 "status": "error",

@@ -90,7 +90,22 @@ export default function Dashboard() {
       })
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
-      toast.error('Failed to load dashboard data')
+      
+      // Check if it's an authentication error
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      if (errorMessage.includes('No valid access token') || errorMessage.includes('authenticate first')) {
+        console.log('Authentication required - using demo data for now')
+        toast.error('Demo mode: Please complete authentication for live data')
+        // Set demo data for testing
+        setStats({
+          totalEmails: 25,
+          urgentEmails: 3,
+          upcomingMeetings: 2,
+          briefsGenerated: 1
+        })
+      } else {
+        toast.error('Failed to load dashboard data')
+      }
     } finally {
       setLoading(false)
     }
