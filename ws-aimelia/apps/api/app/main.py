@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from .graph_auth import router as auth_router
 from .outlook import router as email_router
 from .calendar import router as cal_router
@@ -9,11 +10,31 @@ from .meeting_prep_endpoints import router as prep_router
 from .scheduler_endpoints import router as scheduler_router
 from .debug_auth import router as debug_router
 from .setup import router as setup_router
+from .db import Base, engine
+import logging
+
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Create database tables
+    try:
+        logger.info("Creating database tables on startup...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Database tables created successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to create database tables: {e}")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Application shutting down")
 
 app = FastAPI(
     title="Aimelia API",
     description="AI-powered personal assistant for Williams, Stanley & Co",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware

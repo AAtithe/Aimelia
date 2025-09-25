@@ -18,11 +18,15 @@ class TokenManager:
     
     def __init__(self):
         # Initialize Fernet only if encryption key is available
-        if settings.ENCRYPTION_KEY:
-            self.fernet = Fernet(settings.ENCRYPTION_KEY.encode())
-        else:
+        try:
+            if settings.ENCRYPTION_KEY:
+                self.fernet = Fernet(settings.ENCRYPTION_KEY.encode())
+            else:
+                self.fernet = None
+                logger.warning("ENCRYPTION_KEY not set. Token encryption disabled.")
+        except Exception as e:
+            logger.error(f"Failed to initialize encryption: {e}")
             self.fernet = None
-            logger.warning("ENCRYPTION_KEY not set. Token encryption disabled.")
         
         self.tenant_id = settings.TENANT_ID
         self.client_id = settings.CLIENT_ID
