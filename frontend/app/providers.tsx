@@ -49,7 +49,23 @@ export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Check if we just returned from authentication
     const urlParams = new URLSearchParams(window.location.search)
-    const fromAuth = urlParams.has('code') || document.referrer.includes('login.microsoftonline.com')
+    const authStatus = urlParams.get('auth')
+    const authReason = urlParams.get('reason')
+    const authDetails = urlParams.get('details')
+    
+    // Handle authentication result messages
+    if (authStatus === 'success') {
+      console.log('🎉 Authentication successful!')
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname)
+    } else if (authStatus === 'error') {
+      console.error('❌ Authentication failed:', authReason, authDetails)
+      alert(`Authentication failed: ${authReason}\n${authDetails || 'Please try again'}`)
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+    
+    const fromAuth = urlParams.has('code') || urlParams.has('auth') || document.referrer.includes('login.microsoftonline.com')
     
     // If we just returned from auth, check immediately, otherwise add small delay
     const timer = setTimeout(() => {

@@ -42,7 +42,15 @@ async def login():
 
 @router.get("/callback")
 async def callback(request: Request, code: str | None = None, error: str | None = None, error_description: str | None = None, db: Session = Depends(get_db)):
-    logger.info(f"Callback received - code: {code is not None}, error: {error}")
+    # Enhanced logging for debugging
+    logger.info(f"=== AUTH CALLBACK DEBUG ===")
+    logger.info(f"Code present: {code is not None}")
+    logger.info(f"Error: {error}")
+    logger.info(f"Error description: {error_description}")
+    logger.info(f"Full request URL: {request.url}")
+    logger.info(f"Query params: {dict(request.query_params)}")
+    logger.info(f"Headers: {dict(request.headers)}")
+    
     # Handle authentication errors
     if error:
         error_messages = {
@@ -111,16 +119,15 @@ async def callback(request: Request, code: str | None = None, error: str | None 
         
         if success:
             # Redirect to main page, frontend will detect authentication status
-            logger.info("Redirecting to main page")
-            return RedirectResponse(url="https://aimelia.vercel.app/")
+            logger.info("✅ Authentication successful, redirecting to main page")
+            return RedirectResponse(url="https://aimelia.vercel.app/?auth=success")
         else:
-            return {
-                "status": "error",
-                "tokens_saved": False,
-                "message": "Failed to store tokens"
-            }
+            logger.error("❌ Token storage failed")
+            return RedirectResponse(url="https://aimelia.vercel.app/?auth=error&reason=token_storage_failed")
     except Exception as e:
-        return {"status": "error", "message": f"Authentication failed: {str(e)}"}
+        logger.error(f"❌ Authentication exception: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        return RedirectResponse(url=f"https://aimelia.vercel.app/?auth=error&reason=auth_failed&details={str(e)[:100]}")
 
 @router.get("/test-callback")
 async def test_callback():
@@ -139,6 +146,34 @@ async def get_token(db: Session = Depends(get_db)):
         }
     else:
         return {"status": "error", "message": "No valid token available. Please re-authenticate.", "has_token": False}
+
+@router.get("/debug")
+async def debug_auth(db: Session = Depends(get_db)):
+    """Debug authentication system - shows detailed status."""
+    try:
+        # Check if we have stored tokens
+        from .models import UserToken
+        token_record = db.query(UserToken).filter(UserToken.user_id == "tom").first()
+        
+        debug_info = {
+            "encryption_available": token_manager.fernet is not None,
+            "encryption_key_set": settings.ENCRYPTION_KEY is not None,
+            "stored_tokens": token_record is not None,
+            "settings_check": {
+                "tenant_id": settings.TENANT_ID[:8] + "..." if settings.TENANT_ID else None,
+                "client_id": settings.CLIENT_ID[:8] + "..." if settings.CLIENT_ID else None,
+                "client_secret_set": bool(settings.CLIENT_SECRET),
+                "redirect_uri": settings.GRAPH_REDIRECT_URI
+            }
+        }
+        
+        if token_record:
+            debug_info["token_expires_at"] = str(token_record.expires_at)
+            debug_info["token_created_at"] = str(token_record.created_at)
+        
+        return {"debug": debug_info, "status": "ok"}
+    except Exception as e:
+        return {"debug_error": str(e), "status": "error"}
 
 @router.post("/revoke")
 async def revoke_tokens(db: Session = Depends(get_db)):
