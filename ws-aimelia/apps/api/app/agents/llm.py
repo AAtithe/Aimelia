@@ -98,6 +98,8 @@ def _call_openai(model: str, system: str, user: str, temperature: Optional[float
 def _call_mock(role: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Deterministic stand-in so the full pipeline can run without API keys."""
     task = payload.get("task", {})
+    if role == "lookup":
+        return {"calls": []}
     if role == "capture":
         lines = [re.sub(r"^\s*(?:[-*\u2022]|\d+[.)])\s*", "", ln).strip()
                  for ln in str(payload.get("brain_dump", "")).splitlines()]

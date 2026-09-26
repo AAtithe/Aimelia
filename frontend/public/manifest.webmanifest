@@ -1,0 +1,11 @@
+{
+  "name": "Agent Tasks | Williams, Stanley & Co",
+  "short_name": "Agent Tasks",
+  "description": "Your to-do list, worked by a team of agents.",
+  "start_url": "/tasks",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F2F4F6",
+  "theme_color": "#003359",
+  "icons": [{ "src": "/assets/favicon.png", "sizes": "186x186", "type": "image/png", "purpose": "any" }]
+}

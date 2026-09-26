@@ -4,7 +4,7 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://aimelia-api.onrender.com'
 const KEY_STORAGE = 'aimelia_access_key'
 
-export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'done' | 'failed'
+export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'done' | 'failed' | 'scheduled' | 'due'
 
 export interface Question {
   id: string
@@ -57,6 +57,14 @@ export interface Task {
   created_at: string
   open_questions: number
   ready_actions: number
+  kind: 'task' | 'follow_up' | 'routine'
+  parent_id: string | null
+  routine_id: string | null
+  scheduled_for: string | null
+  follow_up_owner: string | null
+  calendar_event: { id: string; start: string; end: string; link?: string } | null
+  stale_nudged_at: string | null
+  handover?: string
   questions?: Question[]
   actions?: Action[]
   events?: AgentEvent[]
@@ -86,6 +94,50 @@ export interface Pipeline {
   run_interval_minutes: number
   house_rules: string
   team_directory: string
+  stale_days: number
+  lessons_in_context: number
+  brief_enabled: boolean
+  brief_time: string
+  brief_weekends: boolean
+  last_brief_date: string | null
+  work_start: string
+  work_end: string
+  focus_minutes: number
+  use_ws_systems: boolean
+}
+
+export interface Routine {
+  id: string
+  title: string
+  notes: string
+  priority: number
+  cadence: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly'
+  weekday: number
+  day_of_month: number
+  lead_days: number
+  next_due: string
+  enabled: boolean
+  created_count: number
+}
+
+export interface Lesson {
+  id: string
+  source: 'edit' | 'rejection' | 'feedback'
+  action_kind: string | null
+  task_title: string
+  before: string
+  after: string
+  note: string
+  active: boolean
+  created_at: string
+}
+
+export interface MonthStats {
+  month: string
+  delivered: number
+  approved_as_is: number
+  edited: number
+  sent_back: number
 }
 
 export interface Briefing {
@@ -94,7 +146,10 @@ export interface Briefing {
   questions: Question[]
   actions: Action[]
   failed: Task[]
+  follow_ups: Task[]
   providers: Record<string, boolean>
+  channels: Record<string, boolean>
+  sources: Record<string, boolean>
 }
 
 export function getKey(): string {
@@ -146,6 +201,8 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   ready: 'Ready to approve',
   done: 'Done',
   failed: 'Failed',
+  scheduled: 'Scheduled',
+  due: 'Follow-up due',
 }
 
 // House pill classes (see app/tasks/house.css). Colour is meaning, not decoration.
@@ -156,6 +213,8 @@ export const STATUS_PILL: Record<TaskStatus, string> = {
   ready: 'Ontrack',
   done: 'Done',
   failed: 'Overdue',
+  scheduled: 'Parked',
+  due: 'Atrisk',
 }
 
 export const KIND_LABEL: Record<string, string> = {
@@ -190,4 +249,19 @@ export function dueState(due: string | null, status: TaskStatus): { pill: string
   if (due < today) return { pill: 'Overdue', label: 'Overdue' }
   if (due === today) return { pill: 'Atrisk', label: 'Due today' }
   return null
+}
+
+export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+export function cadenceText(r: Pick<Routine, 'cadence' | 'weekday' | 'day_of_month'>): string {
+  const day = r.day_of_month === -1 ? 'the last day' : `day ${r.day_of_month}`
+  if (r.cadence === 'weekly') return `Every ${WEEKDAYS[r.weekday]}`
+  if (r.cadence === 'fortnightly') return `Every other ${WEEKDAYS[r.weekday]}`
+  if (r.cadence === 'monthly') return `Monthly on ${day}`
+  return `Quarterly on ${day}`
+}
+
+export function monthLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
 }

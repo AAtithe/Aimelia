@@ -8,6 +8,8 @@ interface TeamData {
   pipeline: Pipeline
   providers: Record<string, boolean>
   default_models: Record<string, string>
+  channels: Record<string, boolean>
+  sources: Record<string, boolean>
 }
 
 type Msg = { ok: boolean; text: string } | null
@@ -64,6 +66,7 @@ export function AgentTeam() {
       )}
 
       <PipelineCard pipeline={data.pipeline} onSaved={load} />
+      <AutomationCard pipeline={data.pipeline} channels={data.channels} sources={data.sources} onSaved={load} />
 
       <div className="card">
         <h2>Workers <span className="hcount">{workers.filter((a) => a.enabled).length} of {workers.length} on</span></h2>
@@ -153,6 +156,91 @@ function PipelineCard({ pipeline, onSaved }: { pipeline: Pipeline; onSaved: () =
               try { await api('/pipeline', { method: 'PATCH', body: p }); setMsg({ ok: true, text: 'Saved.' }); onSaved() }
               catch (e: any) { setMsg({ ok: false, text: e.message }) }
             }}>Save</button>
+            <button className="btn" onClick={() => setP(pipeline)}>Cancel</button>
+          </div>
+        )}
+        <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`}>{msg?.text}</div>
+      </div>
+    </div>
+  )
+}
+
+function AutomationCard({ pipeline, channels, sources, onSaved }: {
+  pipeline: Pipeline; channels: Record<string, boolean>; sources: Record<string, boolean>; onSaved: () => void
+}) {
+  const [p, setP] = useState(pipeline)
+  const [msg, setMsg] = useState<Msg>(null)
+  const [testing, setTesting] = useState('')
+  useEffect(() => setP(pipeline), [pipeline])
+  const keys: (keyof Pipeline)[] = ['stale_days', 'lessons_in_context', 'brief_enabled', 'brief_time', 'brief_weekends',
+    'work_start', 'work_end', 'focus_minutes', 'use_ws_systems']
+  const dirty = keys.some((k) => p[k] !== pipeline[k])
+  const set = (k: keyof Pipeline, v: any) => setP({ ...p, [k]: v })
+
+  const save = async () => {
+    try {
+      await api('/pipeline', { method: 'PATCH', body: Object.fromEntries(keys.map((k) => [k, p[k]])) })
+      setMsg({ ok: true, text: 'Saved.' })
+      onSaved()
+    } catch (e: any) { setMsg({ ok: false, text: e.message }) }
+  }
+
+  const test = async (what: 'notify' | 'sources') => {
+    setTesting(what)
+    setMsg(null)
+    try {
+      if (what === 'notify') {
+        const r = await api<{ results: Record<string, string>; brief: { headline: string } }>('/notify/test', { method: 'POST' })
+        setMsg({ ok: !r.results.none, text: r.results.none || `Sent "${r.brief.headline}". ${Object.entries(r.results).map(([k, v]) => `${k === 'phone' ? 'Phone' : 'Teams'}: ${v}`).join('. ')}.` })
+      } else {
+        const r = await api<Record<string, string>>('/sources/test', { method: 'POST' })
+        setMsg({ ok: Object.values(r).every((v) => v === 'connected' || v === 'not set up'),
+          text: `WSCIP: ${r.wscip}. Payroll Command Center: ${r.pcc}.` })
+      }
+    } catch (e: any) { setMsg({ ok: false, text: e.message }) } finally { setTesting('') }
+  }
+
+  const on = (b: boolean) => (b ? 'set up' : 'not set up')
+
+  return (
+    <div className="card">
+      <h2>Automation</h2>
+      <div className="body">
+        <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>Old tasks and learning</h3>
+        <div className="row2">
+          <label className="fld"><span>Back through Triage after this many untouched days (0 is off)</span>
+            <input type="number" className="num" min={0} max={365} value={p.stale_days} onChange={(e) => set('stale_days', Number(e.target.value))} /></label>
+          <label className="fld"><span>Your past corrections each agent sees (0 is off)</span>
+            <input type="number" className="num" min={0} max={30} value={p.lessons_in_context} onChange={(e) => set('lessons_in_context', Number(e.target.value))} /></label>
+        </div>
+      </div>
+      <div className="body">
+        <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>Morning push to Teams and your phone</h3>
+        <p className="cap">Teams is {on(channels.teams)}; phone is {on(channels.phone)}. They are set on the server with TEAMS_WEBHOOK_URL and NTFY_URL. Never email.</p>
+        <label className="chk"><input type="checkbox" checked={p.brief_enabled} onChange={(e) => set('brief_enabled', e.target.checked)} />Send a morning brief</label>
+        <div className="row2">
+          <label className="fld"><span>At (London time)</span><input type="time" value={p.brief_time} onChange={(e) => set('brief_time', e.target.value)} /></label>
+        </div>
+        <label className="chk"><input type="checkbox" checked={p.brief_weekends} onChange={(e) => set('brief_weekends', e.target.checked)} />At weekends too</label>
+        <div className="toolbar"><button className="btn" disabled={!!testing} onClick={() => test('notify')}>{testing === 'notify' ? 'Sending ...' : 'Send one now to test'}</button></div>
+      </div>
+      <div className="body">
+        <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>Focus time in your calendar</h3>
+        <p className="cap">For work only you can do. Aimelia reads only when you are busy, never what the meetings are, and books the first free slot.</p>
+        <div className="row2">
+          <label className="fld"><span>Working day starts</span><input type="time" value={p.work_start} onChange={(e) => set('work_start', e.target.value)} /></label>
+          <label className="fld"><span>Working day ends</span><input type="time" value={p.work_end} onChange={(e) => set('work_end', e.target.value)} /></label>
+          <label className="fld"><span>Block length (minutes)</span><input type="number" className="num" min={15} max={480} step={15} value={p.focus_minutes} onChange={(e) => set('focus_minutes', Number(e.target.value))} /></label>
+        </div>
+      </div>
+      <div className="body">
+        <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>WSCIP and Payroll Command Center</h3>
+        <p className="cap">WSCIP is {on(sources.wscip)}; Payroll Command Center is {on(sources.pcc)}. The agents only read, through a read-only user in each system, and every lookup is listed in the task&apos;s history.</p>
+        <label className="chk"><input type="checkbox" checked={p.use_ws_systems} onChange={(e) => set('use_ws_systems', e.target.checked)} />Let the agents look things up in these systems</label>
+        <div className="toolbar"><button className="btn" disabled={!!testing} onClick={() => test('sources')}>{testing === 'sources' ? 'Checking ...' : 'Check the connections'}</button></div>
+        {dirty && (
+          <div className="toolbar">
+            <button className="btn primary" onClick={save}>Save</button>
             <button className="btn" onClick={() => setP(pipeline)}>Cancel</button>
           </div>
         )}

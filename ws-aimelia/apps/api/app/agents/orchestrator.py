@@ -112,7 +112,8 @@ def _clean_questions(raw: Any) -> List[Dict[str, str]]:
     return out
 
 
-def build_context(task: AgentTask, team_directory: str = "") -> Dict[str, Any]:
+def build_context(task: AgentTask, team_directory: str = "", lessons_from_tom: Optional[List[Dict[str, Any]]] = None,
+                  facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """What every agent sees about the task."""
     answered = [{"question": q.question, "answer": q.answer}
                 for q in task.questions if q.status == "answered"]
@@ -128,6 +129,14 @@ def build_context(task: AgentTask, team_directory: str = "") -> Dict[str, Any]:
         "tom_feedback": feedback,
         "previous_actions": previous,
         "team_directory": team_directory or "(not filled in yet: name roles rather than people)",
+        "lessons_from_tom": lessons_from_tom or [],
+        **({"facts_from_ws_systems": facts} if facts else {}),
+        **({"this_is_a_follow_up": {
+            "owner": (task.follow_up or {}).get("owner"),
+            "handover_sent": (task.follow_up or {}).get("handover"),
+            "instruction": "The work was delegated and has not come back. Draft a short, firm chaser to the owner "
+                           "(kind delegate, same owner, a new due date) and say what Tom should check."}}
+           if task.kind == "follow_up" else {}),
     }
 
 
@@ -146,7 +155,11 @@ def run_task(db: Session, task: AgentTask) -> str:
 
     task.run_count = (task.run_count or 0) + 1
     task.last_run_at = now()
-    context = build_context(task, pipeline.team_directory or "")
+    from . import lessons, sources
+    facts = sources.gather_facts(db, task)
+    context = build_context(task, pipeline.team_directory or "",
+                            lessons.for_context(db, pipeline.lessons_in_context if pipeline.lessons_in_context is not None else 8),
+                            facts)
     draft: List[Dict[str, Any]] = []
     reviewer_feedback: Optional[Dict[str, Any]] = None
     last_review: Dict[str, Any] = {}

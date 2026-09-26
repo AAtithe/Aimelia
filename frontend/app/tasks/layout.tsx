@@ -4,7 +4,9 @@ import './house.css'
 export const metadata: Metadata = {
   title: 'Agent Tasks | Williams, Stanley & Co',
   description: 'Your to-do list, worked by a team of agents.',
-  icons: { icon: '/assets/favicon.png' },
+  icons: { icon: '/assets/favicon.png', apple: '/assets/favicon.png' },
+  manifest: '/manifest.webmanifest',
+  appleWebApp: { capable: true, title: 'Agent Tasks', statusBarStyle: 'default' },
 }
 
 export default function TasksLayout({ children }: { children: React.ReactNode }) {

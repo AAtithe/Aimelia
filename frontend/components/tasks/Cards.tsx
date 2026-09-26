@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { api, Action, Question, KIND_LABEL, STATUS_LABEL, STATUS_PILL, TaskStatus, fmtDate } from '@/lib/todoApi'
+import { api, Action, Question, Task, KIND_LABEL, STATUS_LABEL, STATUS_PILL, TaskStatus, fmtDate } from '@/lib/todoApi'
 
 export function StatusPill({ status }: { status: TaskStatus }) {
   return <span className={`pill ${STATUS_PILL[status]}`}>{STATUS_LABEL[status]}</span>
@@ -163,5 +163,89 @@ export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: 
       )}
       <MsgLine msg={msg} />
     </div>
+  )
+}
+
+export function FollowUpItem({ t, onDone }: { t: Task; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<Msg>(null)
+  const [show, setShow] = useState(false)
+
+  const go = async (outcome: 'delivered' | 'chase' | 'snooze', ok: string) => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await api(`/tasks/${t.id}/follow-up`, { method: 'POST', body: { outcome, days: 7 } })
+      setMsg({ ok: true, text: ok })
+      setTimeout(onDone, 900)
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="item">
+      <div className="o"><span className="tag">Handed to {t.follow_up_owner || 'the owner'}</span><span>Due back {fmtDate(t.due_date)}</span></div>
+      <div className="t">{t.title}</div>
+      <div className="meta">Has it come back, and is it right?</div>
+      {t.handover && (
+        <>
+          <button className="linkbtn" style={{ marginTop: 6 }} onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} the handover that was sent</button>
+          {show && <div className="content">{t.handover}</div>}
+        </>
+      )}
+      <div className="toolbar">
+        <button className="btn primary" disabled={busy} onClick={() => go('delivered', 'Closed. The original task is closed too.')}>Delivered, close it</button>
+        <button className="btn" disabled={busy} onClick={() => go('chase', 'The team is drafting a chaser for you to approve.')}>Not yet, draft a chaser</button>
+        <button className="btn" disabled={busy} onClick={() => go('snooze', 'Checking again in a week.')}>Give it another week</button>
+      </div>
+      <MsgLine msg={msg} />
+    </div>
+  )
+}
+
+/**
+ * Dictation into a text box, using the browser's own speech recognition
+ * (Chrome, Edge and Safari on iPhone). Nothing is recorded or uploaded by us.
+ */
+export function VoiceButton({ onText }: { onText: (text: string) => void }) {
+  const [listening, setListening] = useState(false)
+  const [err, setErr] = useState('')
+  const [rec, setRec] = useState<any>(null)
+
+  const start = () => {
+    const SR = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+    if (!SR) {
+      setErr('This browser cannot take dictation. Use Chrome, Edge or Safari, or the dictation key on your phone keyboard.')
+      return
+    }
+    const r = new SR()
+    r.lang = 'en-GB'
+    r.continuous = true
+    r.interimResults = false
+    r.onresult = (e: any) => {
+      let said = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) said += e.results[i][0].transcript
+      if (said.trim()) onText(said.trim())
+    }
+    r.onerror = (e: any) => { setErr(e.error === 'not-allowed' ? 'Microphone access was refused. Allow it in the browser settings.' : `Dictation stopped: ${e.error}`); setListening(false) }
+    r.onend = () => setListening(false)
+    setErr('')
+    r.start()
+    setRec(r)
+    setListening(true)
+  }
+
+  const stop = () => { rec?.stop(); setListening(false) }
+
+  return (
+    <>
+      <button type="button" className={`btn ${listening ? 'danger' : ''}`} onClick={listening ? stop : start} aria-pressed={listening}>
+        {listening ? 'Stop dictating' : 'Dictate'}
+      </button>
+      {err && <span className="msg err" style={{ margin: 0 }}>{err}</span>}
+    </>
   )
 }

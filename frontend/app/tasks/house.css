@@ -110,6 +110,7 @@
 .ws tr.click{cursor:pointer}
 .ws tr.click:hover td{background:#f6f8fb}
 .ws td.nowrap,.ws th.nowrap{white-space:nowrap}
+.ws th.numcell,.ws td.numcell{text-align:right}
 .ws td .t{color:var(--navy);font-weight:600}
 .ws td .d{color:var(--muted);font-size:12px;margin-top:2px}
 

@@ -10,6 +10,7 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [deferTo, setDeferTo] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -37,12 +38,13 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
 
   const refresh = () => { load(); onChanged() }
 
-  const act = async (fn: () => Promise<any>, ok: string) => {
+  // ok is the success message; pass null when fn sets its own.
+  const act = async (fn: () => Promise<any>, ok: string | null) => {
     setBusy(true)
     setMsg(null)
     try {
       await fn()
-      setMsg({ ok: true, text: ok })
+      if (ok) setMsg({ ok: true, text: ok })
       refresh()
     } catch (e: any) {
       setMsg({ ok: false, text: e.message })
@@ -76,10 +78,27 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
             </div>
             {task.summary && <p className="cap" style={{ marginTop: 8 }}>{task.summary}</p>}
             {task.review_flag && <div className="note bad" style={{ marginTop: 10 }}>{task.review_flag}</div>}
+            {task.kind === 'follow_up' && <div className="note info" style={{ marginTop: 10 }}><b>Follow-up.</b> Checks that {task.follow_up_owner || 'the owner'} delivered delegated work.</div>}
+            {task.kind === 'routine' && <div className="note info" style={{ marginTop: 10 }}><b>Routine.</b> Created by a routine; change it in the Routines tab.</div>}
+            {task.status === 'scheduled' && task.scheduled_for && <div className="note info" style={{ marginTop: 10 }}><b>Parked until {fmtDate(task.scheduled_for)}.</b> It comes back to the team on that day.</div>}
+            {task.stale_nudged_at && task.status !== 'done' && <div className="note warn" style={{ marginTop: 10 }}>This sat untouched, so it went back through Triage with an instruction to delegate or drop it.</div>}
+            {task.calendar_event && (
+              <div className="note info" style={{ marginTop: 10 }}>
+                <b>Focus time booked</b> {fmtDateTime(task.calendar_event.start)} to {task.calendar_event.end.slice(11, 16)}.
+                {task.calendar_event.link && <> <a href={task.calendar_event.link} target="_blank" rel="noreferrer">Open in Outlook</a></>}
+              </div>
+            )}
 
             <div className="toolbar">
               <button className="btn" disabled={busy || task.status === 'processing'}
                 onClick={() => act(() => api(`/tasks/${task.id}/run`, { method: 'POST' }), 'Queued. The team will start on it now.')}>Run the team again</button>
+              {task.status !== 'done' && (
+                <button className="btn" disabled={busy}
+                  onClick={() => act(() => api(`/tasks/${task.id}/book`, { method: 'POST', body: {} }).then((r) =>
+                    setMsg({ ok: true, text: `Booked ${fmtDateTime(r.event.start)} to ${r.event.end.slice(11, 16)} in your calendar.` })), null)}>
+                  Book focus time
+                </button>
+              )}
               {task.status !== 'done' && (
                 <button className="btn" disabled={busy}
                   onClick={() => act(() => api(`/tasks/${task.id}`, { method: 'PATCH', body: { status: 'done' } }), 'Task closed.')}>Close the task</button>
@@ -91,6 +110,16 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
               }}>Delete</button>
             </div>
             <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`}>{msg?.text}</div>
+
+            {task.status !== 'done' && task.status !== 'processing' && (
+              <div className="toolbar">
+                <label className="fld" style={{ margin: 0 }}><span>Park it until</span>
+                  <input type="date" value={deferTo} onChange={(e) => setDeferTo(e.target.value)} />
+                </label>
+                <button className="btn" style={{ alignSelf: 'flex-end' }} disabled={busy || !deferTo}
+                  onClick={() => act(() => api(`/tasks/${task.id}/defer`, { method: 'POST', body: { until: deferTo } }), `Parked until ${fmtDate(deferTo)}.`)}>Defer</button>
+              </div>
+            )}
 
             <h3>Brief for the team</h3>
             <textarea className="inp" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)}
@@ -158,10 +187,11 @@ function EventRow({ e }: { e: AgentEvent }) {
   else if (e.kind === 'answer') text = `You answered "${c.question}": ${c.answer}`
   else if (e.kind === 'feedback') text = c.text
   else if (e.kind === 'error') text = c.error
+  else if (e.kind === 'lookup') text = c.error ? `Could not look anything up: ${c.error}` : `Looked up ${(c.calls || []).map((x: any) => `${x.call}${x.error ? ' (failed)' : ''}${x.why ? `: ${x.why}` : ''}`).join('; ')}`
   else if (e.kind === 'status') text = `${c.status === 'queued' ? 'Queued' : `Now ${c.status}`}${c.reason ? `: ${c.reason}` : ''}${c.action ? `, ${c.action}` : ''}`
   return (
     <li className={e.kind === 'error' ? 'err' : ''}>
-      <span className="who">{e.actor === 'tom' ? 'You' : e.actor}</span>
+      <span className="who">{e.actor === 'tom' ? 'You' : e.actor.charAt(0).toUpperCase() + e.actor.slice(1)}</span>
       {e.attempt > 0 && <span className="when">round {e.attempt + 1}</span>}
       <span className="when">{fmtDateTime(e.created_at)}</span>
       <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>

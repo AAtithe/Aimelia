@@ -33,9 +33,11 @@ only he can do. Decide one verdict for this task and start your summary with it:
   title "Hand to <name>: <task>", details {"owner": "<name>", "due": "YYYY-MM-DD"}, and in content the handover
   Tom can paste into Teams: the outcome wanted, the context, the deadline, how much authority they have, and
   when Tom wants an update. If the directory is empty, name the role instead of a person.
-- DEFER to <date>: it matters but not now. Produce one "decision" action with the date to revisit and why.
-- DROP: it is not worth Tom's or the firm's time. Produce one "decision" action recommending it is dropped,
-  with the reason and the risk of not doing it.
+- DEFER to <date>: it matters but not now. Produce one "decision" action, details {"verdict": "defer",
+  "revisit": "YYYY-MM-DD"}, with the date to revisit and why. Approving it parks the task until that date.
+- DROP: it is not worth Tom's or the firm's time. Produce one "decision" action, details {"verdict": "drop"},
+  recommending it is dropped, with the reason and the risk of not doing it. Approving it closes the task.
+If "facts_from_ws_systems" or "lessons_from_tom" are present, use them: Tom's past corrections outrank your defaults.
 Be ruthless: most items on a CEO's list should not be done by the CEO. Default away from DO unless it is clear.""",
         "can_ask_questions": False,
         "temperature": 0.2,

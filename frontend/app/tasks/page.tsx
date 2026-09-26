@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, Briefing, Task, PRIORITY_LABEL, dueState, fmtDate, getKey, setKey } from '@/lib/todoApi'
-import { ActionItem, QuestionItem, StatusPill } from '@/components/tasks/Cards'
+import { ActionItem, FollowUpItem, QuestionItem, StatusPill, VoiceButton } from '@/components/tasks/Cards'
+import { Routines } from '@/components/tasks/Routines'
+import { Learning } from '@/components/tasks/Learning'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
 import { AgentTeam } from '@/components/tasks/AgentTeam'
 
-type Tab = 'briefing' | 'tasks' | 'team'
+type Tab = 'briefing' | 'tasks' | 'routines' | 'learning' | 'team'
 
 export default function TasksPage() {
   const [hasKey, setHasKey] = useState<boolean | null>(null)
@@ -103,7 +105,7 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
   }
 
   const c = brief?.counts || {}
-  const waiting = brief ? brief.questions.length + brief.actions.length : 0
+  const waiting = brief ? brief.questions.length + brief.actions.length + brief.follow_ups.length : 0
   const overdue = (tasks || []).filter((t) => dueState(t.due_date, t.status)?.label === 'Overdue').length
   const noKeys = brief && !brief.providers.anthropic && !brief.providers.openai
 
@@ -121,13 +123,16 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
       </header>
 
       <div className="wrap">
-        {tab !== 'team' && (
+        {(tab === 'briefing' || tab === 'tasks') && (
           <div className="kpis">
             <button className={`kpi pick ${brief?.questions.length ? 'warn' : 'none'}`} onClick={() => setTab('briefing')}>
               <span className="n">{brief ? brief.questions.length : '–'}</span><span className="l">Questions for you</span>
             </button>
             <button className={`kpi pick ${brief?.actions.length ? '' : 'none'}`} onClick={() => setTab('briefing')}>
               <span className="n">{brief ? brief.actions.length : '–'}</span><span className="l">Ready to approve</span>
+            </button>
+            <button className={`kpi pick ${brief?.follow_ups.length ? 'warn' : 'none'}`} onClick={() => setTab('briefing')}>
+              <span className="n">{brief ? brief.follow_ups.length : '–'}</span><span className="l">Follow-ups due</span>
             </button>
             <button className="kpi pick" onClick={() => setTab('tasks')}>
               <span className="n">{brief ? working : '–'}</span><span className="l">Team working on</span>
@@ -145,7 +150,7 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
         )}
 
         <div className="main-tabs" role="tablist">
-          {([['briefing', 'Briefing'], ['tasks', 'All tasks'], ['team', 'Agent team']] as [Tab, string][]).map(([id, label]) => (
+          {([['briefing', 'Briefing'], ['tasks', 'All tasks'], ['routines', 'Routines'], ['learning', 'Learning'], ['team', 'Agent team']] as [Tab, string][]).map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id} className={`main-tab-btn ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
               {label}{id === 'briefing' && waiting > 0 && <span className="cnt">{waiting}</span>}
             </button>
@@ -153,7 +158,7 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
         </div>
         <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`} style={{ marginTop: -8, marginBottom: 6 }}>{msg?.text}</div>
 
-        {noKeys && tab !== 'team' && (
+        {noKeys && (tab === 'briefing' || tab === 'tasks') && (
           <div className="note warn">
             No AI key is set on the server, so the agents are giving placeholder answers. Set ANTHROPIC_API_KEY or OPENAI_API_KEY on Render.
           </div>
@@ -166,6 +171,12 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
               <div className="card">
                 <h2>Answer these so the team can finish <span className="hcount">{brief.questions.length}</span></h2>
                 {brief.questions.map((q) => <QuestionItem key={q.id} q={q} onDone={load} />)}
+              </div>
+            )}
+            {brief.follow_ups.length > 0 && (
+              <div className="card">
+                <h2>Delegated work due back <span className="hcount">{brief.follow_ups.length}</span></h2>
+                {brief.follow_ups.map((t) => <FollowUpItem key={t.id} t={t} onDone={load} />)}
               </div>
             )}
             {brief.actions.length > 0 && (
@@ -203,6 +214,8 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
           </>
         )}
 
+        {tab === 'routines' && <Routines />}
+        {tab === 'learning' && <Learning />}
         {tab === 'team' && <AgentTeam />}
       </div>
 
@@ -222,7 +235,10 @@ function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => v
           {tasks.map((t) => {
             const due = dueState(t.due_date, t.status)
             const waiting = [t.open_questions && `${t.open_questions} question${t.open_questions === 1 ? '' : 's'} for you`,
-              t.ready_actions && `${t.ready_actions} ready to approve`].filter(Boolean).join(', ')
+              t.ready_actions && `${t.ready_actions} ready to approve`,
+              t.status === 'scheduled' && t.scheduled_for && `parked until ${fmtDate(t.scheduled_for)}`,
+              t.kind === 'follow_up' && `checking ${t.follow_up_owner || 'the owner'} delivered`,
+              t.kind === 'routine' && 'from a routine'].filter(Boolean).join(', ')
             return (
               <tr key={t.id} className="click" onClick={() => onOpen(t.id)} tabIndex={0}
                 onKeyDown={(e) => e.key === 'Enter' && onOpen(t.id)}>
@@ -287,7 +303,7 @@ function BrainDump({ onAdded }: { onAdded: () => void }) {
         </div>
         {mode === 'dump' ? (
           <>
-            <p className="cap">Paste everything on your mind, as messy as it comes. It is split into separate tasks, and Triage decides which ones you do, delegate, defer or drop.</p>
+            <p className="cap">Paste or dictate everything on your mind, as messy as it comes. It is split into separate tasks, and Triage decides which ones you do, delegate, defer or drop.</p>
             <textarea className="inp" rows={5} value={text} onChange={(e) => setText(e.target.value)} aria-label="Brain dump"
               placeholder={'Chase Corrigans for Q3 tronc sign-off before Friday\nBentleys want to talk about labour %, book a call\nReview Sam\'s pay rise case\nPrice for the new Soho group, 6 sites'} />
           </>
@@ -316,6 +332,7 @@ function BrainDump({ onAdded }: { onAdded: () => void }) {
           <button className="btn primary" disabled={busy || !ready} onClick={submit}>
             {busy ? 'Sending ...' : mode === 'dump' ? 'Split and hand to the team' : 'Hand to the team'}
           </button>
+          <VoiceButton onText={(said) => setText((prev) => (prev ? `${prev.replace(/\s+$/, '')}\n${said}` : said))} />
         </div>
         <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`}>{msg?.text}</div>
       </div>
