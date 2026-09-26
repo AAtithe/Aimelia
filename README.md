@@ -1,5 +1,13 @@
 # Aimelia
 
-AI personal assistant for Williams, Stanley & Co.
+Tom Stanley's assistant for Williams, Stanley & Co: a to-do list worked by a team of AI agents, plus email triage,
+reply drafting, meeting briefs and prep, a knowledge base and a morning push. One Next.js app on Vercel with Neon Postgres,
+in the firm's house style.
 
-- Agent Tasks (multi-agent to-do list with reviewer): see [docs/AGENT_TASKS.md](docs/AGENT_TASKS.md). Open `/tasks` in the frontend.
+- Set it up: [docs/SETUP.md](docs/SETUP.md)
+- How it works, security, and what changed: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)
+
+```bash
+npm install && npm run dev   # local, see docs/SETUP.md
+npm test
+```
