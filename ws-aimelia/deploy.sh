@@ -46,7 +46,7 @@ case $choice in
         echo "You'll need to set these in Vercel dashboard:"
         echo "- TENANT_ID: 0cf82021-6ddc-4fae-987a-d29ef04d571a"
         echo "- CLIENT_ID: 880818f6-a9af-43ea-9c12-1813bcecce89"
-        echo "- CLIENT_SECRET: -cm8Q~MhnYA601zflBkoSm-c0WJPMvx_FBlijaCv"
+        echo "- CLIENT_SECRET: (set in the Render dashboard; never commit it)"
         echo "- GRAPH_REDIRECT_URI: https://your-project.vercel.app/auth/callback"
         echo "- APP_BASE_URL: https://your-project.vercel.app"
         echo ""

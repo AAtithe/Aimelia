@@ -1,9 +1,30 @@
-import httpx, base64, os, logging
-from fastapi import APIRouter, Request, Depends
-from fastapi.responses import RedirectResponse, HTMLResponse
+"""
+Microsoft 365 sign-in for Aimelia.
+
+Security rules this module enforces:
+- No route ever returns an access or refresh token. The browser only learns
+  whether Aimelia is connected; tokens stay encrypted on the server.
+- The sign-in is bound to the browser that started it (signed, expiring state
+  plus a matching cookie), so a sign-in cannot be forged from another site.
+- Only the owner's account can connect. Whoever signs in is checked against
+  AIMELIA_OWNER_EMAIL before anything is stored, so nobody else in the tenant
+  can swap their mailbox in for Tom's.
+- /login and /callback are public (Microsoft redirects the browser to them);
+  every other route here needs the access key.
+"""
+import logging
+import secrets
+from urllib.parse import urlencode
+
+import httpx
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy.orm import Session
-from .settings import settings
+
 from .db import get_db
+from .security import require_access_key
+from .settings import settings
 from .token_manager import token_manager
 
 logger = logging.getLogger(__name__)
@@ -11,6 +32,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 auth_base = "https://login.microsoftonline.com"
+STATE_COOKIE = "aimelia_oauth"
+STATE_MAX_AGE = 600  # seconds a sign-in may take
+
 
 def auth_urls():
     tenant = settings.TENANT_ID
@@ -18,6 +42,7 @@ def auth_urls():
         "authorize": f"{auth_base}/{tenant}/oauth2/v2.0/authorize",
         "token": f"{auth_base}/{tenant}/oauth2/v2.0/token",
     }
+
 
 SCOPES = [
     "offline_access",
@@ -27,159 +52,126 @@ SCOPES = [
     "https://graph.microsoft.com/User.Read",
 ]
 
+
+def _serializer() -> URLSafeTimedSerializer:
+    secret = settings.AIMELIA_ACCESS_KEY or settings.ENCRYPTION_KEY
+    if not secret:
+        raise RuntimeError("AIMELIA_ACCESS_KEY is not configured on the server.")
+    return URLSafeTimedSerializer(secret, salt="aimelia-oauth-state")
+
+
+def _owners() -> set:
+    return {e.strip().lower() for e in (settings.AIMELIA_OWNER_EMAIL or "").split(",") if e.strip()}
+
+
+def _frontend(result: str, reason: str = "") -> RedirectResponse:
+    query = urlencode({"auth": result, **({"reason": reason} if reason else {})})
+    response = RedirectResponse(url=f"{settings.AIMELIA_FRONTEND_URL.rstrip('/')}/?{query}")
+    response.delete_cookie(STATE_COOKIE, path="/auth")
+    return response
+
+
 @router.get("/login")
 async def login():
-    from urllib.parse import urlencode
+    if not _owners():
+        return _frontend("error", "owner_not_configured")
+    nonce = secrets.token_urlsafe(24)
     params = {
         "client_id": settings.CLIENT_ID,
         "response_type": "code",
         "redirect_uri": settings.GRAPH_REDIRECT_URI,
         "response_mode": "query",
         "scope": " ".join(SCOPES),
-        "state": "aimelia",
+        "state": _serializer().dumps(nonce),
+        "prompt": "select_account",
     }
-    return RedirectResponse(url=f"{auth_urls()['authorize']}?{urlencode(params)}")
+    response = RedirectResponse(url=f"{auth_urls()['authorize']}?{urlencode(params)}")
+    response.set_cookie(STATE_COOKIE, nonce, max_age=STATE_MAX_AGE, httponly=True, path="/auth",
+                        secure=settings.GRAPH_REDIRECT_URI.startswith("https://"), samesite="lax")
+    return response
+
 
 @router.get("/callback")
-async def callback(request: Request, code: str | None = None, error: str | None = None, error_description: str | None = None, db: Session = Depends(get_db)):
-    # Enhanced logging for debugging
-    logger.info(f"=== AUTH CALLBACK DEBUG ===")
-    logger.info(f"Code present: {code is not None}")
-    logger.info(f"Error: {error}")
-    logger.info(f"Error description: {error_description}")
-    logger.info(f"Full request URL: {request.url}")
-    logger.info(f"Query params: {dict(request.query_params)}")
-    logger.info(f"Headers: {dict(request.headers)}")
-    
-    # Handle authentication errors
+async def callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None,
+                   db: Session = Depends(get_db)):
     if error:
-        error_messages = {
-            "access_denied": "User declined to consent to access the app. Please try again and accept the permissions.",
-            "invalid_request": "Invalid authentication request. Please try again.",
-            "unauthorized_client": "Client authentication failed. Please contact support.",
-            "unsupported_response_type": "Unsupported response type. Please contact support.",
-            "invalid_scope": "Invalid scope requested. Please contact support.",
-            "server_error": "Authentication server error. Please try again later.",
-            "temporarily_unavailable": "Authentication service temporarily unavailable. Please try again later."
-        }
-        
-        user_message = error_messages.get(error, f"Authentication error: {error}")
-        if error_description:
-            user_message += f" Details: {error_description}"
-        
-        return {
-            "error": error,
-            "error_description": error_description,
-            "message": user_message,
-            "status": "error"
-        }
-    
-    if not code:
-        return {"error": "no_code", "message": "No authorization code received. Please try logging in again."}
-    
-    data = {
-        "client_id": settings.CLIENT_ID,
-        "client_secret": settings.CLIENT_SECRET,
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": settings.GRAPH_REDIRECT_URI,
-        "scope": " ".join(SCOPES),
-    }
-    
+        logger.warning("Microsoft sign-in returned an error: %s", error)
+        return _frontend("error", error)
+    # The state must be ours, recent, and belong to this browser.
     try:
-        async with httpx.AsyncClient() as client:
-            tok = await client.post(auth_urls()["token"], data=data)
-            
-            if tok.status_code == 401:
-                error_detail = tok.text
-                return {
-                    "error": "unauthorized",
-                    "message": f"Authentication failed: {tok.status_code} {tok.reason_phrase}",
-                    "details": error_detail,
-                    "debug_info": {
-                        "client_id": settings.CLIENT_ID,
-                        "redirect_uri": settings.GRAPH_REDIRECT_URI,
-                        "scope": " ".join(SCOPES)
-                    }
-                }
-            
-            tok.raise_for_status()
+        nonce = _serializer().loads(state or "", max_age=STATE_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return _frontend("error", "invalid_state")
+    cookie = request.cookies.get(STATE_COOKIE) or ""
+    if not code or not secrets.compare_digest(str(nonce), cookie):
+        return _frontend("error", "invalid_state")
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            tok = await client.post(auth_urls()["token"], data={
+                "client_id": settings.CLIENT_ID,
+                "client_secret": settings.CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": settings.GRAPH_REDIRECT_URI,
+                "scope": " ".join(SCOPES),
+            })
+            if tok.status_code >= 300:
+                logger.error("Token exchange failed: HTTP %s", tok.status_code)
+                return _frontend("error", "token_exchange_failed")
             tokens = tok.json()
-        
-        # Store encrypted tokens in database
-        logger.info(f"Attempting to store tokens for user 'tom'")
-        logger.info(f"Tokens received: {list(tokens.keys())}")
-        
-        # Store encrypted tokens in database
-        success = await token_manager.store_tokens(db, "tom", tokens)
-        logger.info(f"Token storage result: {success}")
-        
-        if not success:
-            logger.error("Token storage failed - this will cause authentication to fail")
-        
-        if success:
-            # Redirect to main page, frontend will detect authentication status
-            logger.info("✅ Authentication successful, redirecting to main page")
-            return RedirectResponse(url="https://aimelia.vercel.app/?auth=success")
-        else:
-            logger.error("❌ Token storage failed")
-            return RedirectResponse(url="https://aimelia.vercel.app/?auth=error&reason=token_storage_failed")
-    except Exception as e:
-        logger.error(f"❌ Authentication exception: {str(e)}")
-        logger.error(f"Exception type: {type(e).__name__}")
-        return RedirectResponse(url=f"https://aimelia.vercel.app/?auth=error&reason=auth_failed&details={str(e)[:100]}")
+            me = await client.get("https://graph.microsoft.com/v1.0/me",
+                                  params={"$select": "mail,userPrincipalName"},
+                                  headers={"Authorization": f"Bearer {tokens['access_token']}"})
+            if me.status_code >= 300:
+                return _frontend("error", "could_not_confirm_account")
+            profile = me.json()
+    except (httpx.HTTPError, KeyError, ValueError) as e:
+        logger.error("Sign-in failed: %s", type(e).__name__)
+        return _frontend("error", "auth_failed")
 
-@router.get("/test-callback")
-async def test_callback():
-    """Test endpoint to verify callback is working."""
-    return {"status": "ok", "message": "Callback endpoint is working"}
+    who = {str(profile.get("mail") or "").lower(), str(profile.get("userPrincipalName") or "").lower()} - {""}
+    if not who & _owners():
+        logger.warning("Refused sign-in from an account that is not the owner")
+        return _frontend("error", "wrong_account")
 
-@router.get("/token")
-async def get_token(db: Session = Depends(get_db)):
-    """Get a valid access token for the authenticated user."""
-    access_token = await token_manager.get_valid_access_token(db, "tom")
-    if access_token:
-        return {
-            "status": "ok", 
-            "has_token": True,
-            "access_token": access_token
-        }
-    else:
-        return {"status": "error", "message": "No valid token available. Please re-authenticate.", "has_token": False}
+    if not await token_manager.store_tokens(db, "tom", tokens):
+        return _frontend("error", "token_storage_failed")
+    return _frontend("success")
 
-@router.get("/debug")
+
+@router.get("/token", dependencies=[Depends(require_access_key)])
+async def token_status(db: Session = Depends(get_db)):
+    """Whether Aimelia is connected to Microsoft 365. Never returns the token itself."""
+    from .models import UserToken
+
+    connected = await token_manager.get_valid_access_token(db, "tom") is not None
+    record = db.query(UserToken).filter(UserToken.user_id == "tom").first()
+    return {"status": "ok" if connected else "error", "has_token": connected,
+            "expires_at": record.expires_at.isoformat() if connected and record else None,
+            **({} if connected else {"message": "Not connected to Microsoft 365. Sign in again."})}
+
+
+@router.get("/debug", dependencies=[Depends(require_access_key)])
 async def debug_auth(db: Session = Depends(get_db)):
-    """Debug authentication system - shows detailed status."""
-    try:
-        # Check if we have stored tokens
-        from .models import UserToken
-        token_record = db.query(UserToken).filter(UserToken.user_id == "tom").first()
-        
-        debug_info = {
-            "encryption_available": token_manager.fernet is not None,
-            "encryption_key_set": settings.ENCRYPTION_KEY is not None,
-            "stored_tokens": token_record is not None,
-            "settings_check": {
-                "tenant_id": settings.TENANT_ID[:8] + "..." if settings.TENANT_ID else None,
-                "client_id": settings.CLIENT_ID[:8] + "..." if settings.CLIENT_ID else None,
-                "client_secret_set": bool(settings.CLIENT_SECRET),
-                "redirect_uri": settings.GRAPH_REDIRECT_URI
-            }
-        }
-        
-        if token_record:
-            debug_info["token_expires_at"] = str(token_record.expires_at)
-            debug_info["token_created_at"] = str(token_record.created_at)
-        
-        return {"debug": debug_info, "status": "ok"}
-    except Exception as e:
-        return {"debug_error": str(e), "status": "error"}
+    """Configuration check with no secrets in it."""
+    from .models import UserToken
 
-@router.post("/revoke")
+    record = db.query(UserToken).filter(UserToken.user_id == "tom").first()
+    return {"status": "ok", "debug": {
+        "encryption_key_set": bool(settings.ENCRYPTION_KEY),
+        "encryption_available": token_manager.fernet is not None,
+        "owner_email_set": bool(_owners()),
+        "client_secret_set": bool(settings.CLIENT_SECRET),
+        "redirect_uri": settings.GRAPH_REDIRECT_URI,
+        "stored_tokens": record is not None,
+        "token_expires_at": record.expires_at.isoformat() if record else None,
+    }}
+
+
+@router.post("/revoke", dependencies=[Depends(require_access_key)])
 async def revoke_tokens(db: Session = Depends(get_db)):
-    """Revoke and delete stored tokens."""
+    """Disconnect Microsoft 365: delete the stored tokens."""
     success = await token_manager.revoke_tokens(db, "tom")
-    return {
-        "status": "ok" if success else "error",
-        "message": "Tokens revoked" if success else "Failed to revoke tokens"
-    }
+    return {"status": "ok" if success else "error",
+            "message": "Tokens revoked" if success else "Failed to revoke tokens"}

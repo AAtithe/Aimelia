@@ -10,7 +10,8 @@ import {
   Brain,
   PenTool,
   Star,
-  Zap
+  Zap,
+  ListTodo
 } from 'lucide-react'
 
 type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep' | 'automation'
@@ -49,6 +50,13 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 p-4 space-y-2">
+        <a
+          href="/tasks"
+          className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-left transition-all duration-200 bg-slate-900 text-white hover:bg-slate-800"
+        >
+          <ListTodo className="w-5 h-5" />
+          <span className="font-medium">Agent Tasks</span>
+        </a>
         {menuItems.map((item) => {
           const Icon = item.icon
           const isActive = activeTab === item.id

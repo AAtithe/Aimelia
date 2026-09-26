@@ -17,7 +17,7 @@ import toast from 'react-hot-toast'
 type TabType = 'emails' | 'calendar' | 'briefs' | 'analytics' | 'ai' | 'drafting' | 'prep' | 'automation'
 
 export default function Dashboard() {
-  const { isAuthenticated, logout } = useAuth()
+  const { isAuthenticated, logout, login } = useAuth()
   const { makeRequest } = useApi()
   const [activeTab, setActiveTab] = useState<TabType>('emails')
   const [loading, setLoading] = useState(false)
@@ -51,7 +51,7 @@ export default function Dashboard() {
             Your AI-powered personal assistant for Williams, Stanley & Co
           </p>
           <button
-            onClick={() => window.location.href = 'https://aimelia-api.onrender.com/auth/login'}
+            onClick={login}
             className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-8 rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 transform hover:scale-105"
           >
             Sign in with Microsoft 365

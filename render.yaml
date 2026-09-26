@@ -21,6 +21,28 @@ services:
         value: https://aimelia-api.onrender.com/auth/callback
       - key: OPENAI_API_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AIMELIA_ACCESS_KEY
+        sync: false
+      - key: AIMELIA_OWNER_EMAIL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: AIMELIA_APP_URL
+        value: https://aimelia.vercel.app/tasks
+      - key: TEAMS_WEBHOOK_URL
+        sync: false
+      - key: NTFY_URL
+        sync: false
+      - key: WSCIP_EMAIL
+        sync: false
+      - key: WSCIP_PASSWORD
+        sync: false
+      - key: PCC_EMAIL
+        sync: false
+      - key: PCC_PASSWORD
+        sync: false
       - key: APP_BASE_URL
         value: https://aimelia-api.onrender.com
       - key: TIMEZONE

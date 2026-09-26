@@ -1,13 +1,20 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { getKey, setKey } from '@/lib/todoApi'
 
-// Auth context
+// The browser never holds a Microsoft token. It holds only the Aimelia access
+// key (the same one Agent Tasks uses), sends it on every call, and asks the
+// API whether Aimelia is connected to Microsoft 365.
+
 interface AuthContextType {
   isAuthenticated: boolean
+  needsKey: boolean
+  authError: string | null
   user: any
   login: () => void
   logout: () => void
+  saveKey: (key: string) => Promise<boolean>
   loading: boolean
 }
 
@@ -21,7 +28,6 @@ export function useAuth() {
   return context
 }
 
-// API context
 interface ApiContextType {
   apiBaseUrl: string
   makeRequest: (endpoint: string, options?: RequestInit) => Promise<any>
@@ -37,106 +43,78 @@ export function useApi() {
   return context
 }
 
+const AUTH_ERRORS: Record<string, string> = {
+  wrong_account: 'That Microsoft account is not the one allowed to connect Aimelia. Sign in with your own account.',
+  invalid_state: 'That sign-in link had expired or did not start here. Start the sign-in again from this page.',
+  owner_not_configured: 'AIMELIA_OWNER_EMAIL is not set on the server, so no account can connect yet.',
+  token_storage_failed: 'Signed in, but the server could not store the connection safely. Check ENCRYPTION_KEY on Render.',
+  access_denied: 'The permissions were declined. Sign in again and accept them.',
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [needsKey, setNeedsKey] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [accessToken, setAccessToken] = useState<string | null>(null)
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://aimelia-api.onrender.com'
 
-  // Check authentication status on mount
-  useEffect(() => {
-    // Check if we just returned from authentication
-    const urlParams = new URLSearchParams(window.location.search)
-    const authStatus = urlParams.get('auth')
-    const authReason = urlParams.get('reason')
-    const authDetails = urlParams.get('details')
-    
-    // Handle authentication result messages
-    if (authStatus === 'success') {
-      console.log('🎉 Authentication successful!')
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname)
-    } else if (authStatus === 'error') {
-      console.error('❌ Authentication failed:', authReason, authDetails)
-      alert(`Authentication failed: ${authReason}\n${authDetails || 'Please try again'}`)
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname)
+  const checkAuthStatus = useCallback(async () => {
+    if (!getKey()) {
+      setNeedsKey(true)
+      setIsAuthenticated(false)
+      setLoading(false)
+      return
     }
-    
-    const fromAuth = urlParams.has('code') || urlParams.has('auth') || document.referrer.includes('login.microsoftonline.com')
-    
-    // If we just returned from auth, check immediately, otherwise add small delay
-    const timer = setTimeout(() => {
-      checkAuthStatus()
-    }, fromAuth ? 100 : 1000)
-    
-    return () => clearTimeout(timer)
-  }, [])
-
-  const checkAuthStatus = async (retryCount = 0) => {
     try {
-      console.log(`Checking authentication status... (attempt ${retryCount + 1})`)
-      const response = await fetch(`${apiBaseUrl}/auth/token`)
-      console.log('Auth response status:', response.status)
-      
-      if (response.ok) {
+      const response = await fetch(`${apiBaseUrl}/auth/token`, { headers: { 'X-Aimelia-Key': getKey() } })
+      if (response.status === 401) {
+        setKey('')
+        setNeedsKey(true)
+        setIsAuthenticated(false)
+      } else if (response.ok) {
         const data = await response.json()
-        console.log('Auth response data:', data)
-        
-        if (data.status === 'ok' && data.has_token) {
-          console.log('User is authenticated!')
-          setIsAuthenticated(true)
-          if (data.access_token) {
-            setAccessToken(data.access_token)
-            console.log('Access token set')
-          }
-        } else {
-          console.log('User not authenticated:', data.message)
-          setIsAuthenticated(false)
-          // Retry once more after a delay if this is the first attempt
-          if (retryCount === 0) {
-            console.log('Retrying authentication check in 2 seconds...')
-            setTimeout(() => checkAuthStatus(1), 2000)
-            return
-          }
-        }
+        setNeedsKey(false)
+        setIsAuthenticated(data.status === 'ok' && data.has_token)
       } else {
-        console.log('Auth check failed with status:', response.status)
         setIsAuthenticated(false)
       }
-    } catch (error) {
-      console.log('Auth check error:', error)
+    } catch {
       setIsAuthenticated(false)
     } finally {
-      // Always set loading to false after the check completes
       setLoading(false)
     }
-  }
+  }, [apiBaseUrl])
 
-  const getAccessToken = async () => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/auth/token`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.access_token) {
-          setAccessToken(data.access_token)
-        }
-      }
-    } catch (error) {
-      console.error('Failed to get access token:', error)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('auth') === 'error') {
+      const reason = params.get('reason') || ''
+      setAuthError(AUTH_ERRORS[reason] || `Sign-in failed (${reason || 'unknown reason'}). Try again.`)
     }
+    if (params.has('auth')) window.history.replaceState({}, document.title, window.location.pathname)
+    checkAuthStatus()
+  }, [checkAuthStatus])
+
+  const saveKey = async (key: string) => {
+    setKey(key.trim())
+    const response = await fetch(`${apiBaseUrl}/auth/token`, { headers: { 'X-Aimelia-Key': key.trim() } }).catch(() => null)
+    if (!response || response.status === 401) {
+      setKey('')
+      return false
+    }
+    await checkAuthStatus()
+    return true
   }
 
   const login = () => {
-    // Simple redirect approach - let the callback handle the redirect
     window.location.href = `${apiBaseUrl}/auth/login`
   }
 
   const logout = async () => {
     try {
-      await fetch(`${apiBaseUrl}/auth/revoke`, { method: 'POST' })
+      await fetch(`${apiBaseUrl}/auth/revoke`, { method: 'POST', headers: { 'X-Aimelia-Key': getKey() } })
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
@@ -146,45 +124,27 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }
 
   const makeRequest = async (endpoint: string, options: RequestInit = {}) => {
-    const url = `${apiBaseUrl}${endpoint}`
-    
-    // Get fresh access token if we don't have one
-    if (!accessToken && isAuthenticated) {
-      await getAccessToken()
-    }
-    
-    const response = await fetch(url, {
+    const response = await fetch(`${apiBaseUrl}${endpoint}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        'X-Aimelia-Key': getKey(),
         ...options.headers,
       },
     })
-
+    if (response.status === 401) {
+      setKey('')
+      setNeedsKey(true)
+    }
     if (!response.ok) {
       throw new Error(`API request failed: ${response.statusText}`)
     }
-
     return response.json()
   }
 
-  const authValue = {
-    isAuthenticated,
-    user,
-    login,
-    logout,
-    loading,
-  }
-
-  const apiValue = {
-    apiBaseUrl,
-    makeRequest,
-  }
-
   return (
-    <AuthContext.Provider value={authValue}>
-      <ApiContext.Provider value={apiValue}>
+    <AuthContext.Provider value={{ isAuthenticated, needsKey, authError, user, login, logout, saveKey, loading }}>
+      <ApiContext.Provider value={{ apiBaseUrl, makeRequest }}>
         {children}
       </ApiContext.Provider>
     </AuthContext.Provider>
