@@ -131,4 +131,23 @@ class AgentPipelineSettings(Base):
     auto_run = Column(Boolean, default=True)  # background loop picks up queued tasks
     run_interval_minutes = Column(Integer, default=10)
     house_rules = Column(Text, default="")  # standing instructions shared with every agent
+    team_directory = Column(Text, default="")  # who at WS owns what, so work can be delegated
+    defaults_version = Column(Integer, default=0)  # which default agents have been offered
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+def ensure_schema(engine) -> None:
+    """Add columns introduced after a table was first created (create_all never alters tables)."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    for model in (AgentTask, AgentQuestion, AgentAction, AgentEvent, AgentConfig, AgentPipelineSettings):
+        table = model.__table__
+        if not insp.has_table(table.name):
+            continue
+        existing = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            ddl = col.type.compile(dialect=engine.dialect)
+            with engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}'))

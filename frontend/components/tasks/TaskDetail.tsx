@@ -1,16 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
-import { X, Play, Trash2, CheckCheck } from 'lucide-react'
-import { api, Task, AgentEvent } from '@/lib/todoApi'
-import { ActionCard, Btn, QuestionCard, StatusBadge } from './Cards'
+import { api, Task, AgentEvent, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime } from '@/lib/todoApi'
+import { ActionItem, QuestionItem, StatusPill } from './Cards'
 
 export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const [task, setTask] = useState<Task | null>(null)
   const [notes, setNotes] = useState('')
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -18,11 +17,17 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
       setTask(t)
       setNotes(t.notes || '')
     } catch (e: any) {
-      toast.error(e.message)
+      setMsg({ ok: false, text: e.message })
     }
   }, [taskId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   useEffect(() => {
     if (!task || !['queued', 'processing'].includes(task.status)) return
@@ -32,120 +37,115 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
 
   const refresh = () => { load(); onChanged() }
 
-  const act = async (fn: () => Promise<any>, msg: string) => {
+  const act = async (fn: () => Promise<any>, ok: string) => {
     setBusy(true)
+    setMsg(null)
     try {
       await fn()
-      toast.success(msg)
+      setMsg({ ok: true, text: ok })
       refresh()
     } catch (e: any) {
-      toast.error(e.message)
+      setMsg({ ok: false, text: e.message })
     } finally {
       setBusy(false)
     }
   }
 
-  if (!task) return null
-  const open = task.questions?.filter((q) => q.status === 'open') || []
-  const answered = task.questions?.filter((q) => q.status !== 'open') || []
-  const live = task.actions?.filter((a) => a.status === 'proposed') || []
-  const history = task.actions?.filter((a) => a.status !== 'proposed') || []
+  const open = task?.questions?.filter((q) => q.status === 'open') || []
+  const answered = task?.questions?.filter((q) => q.status !== 'open') || []
+  const live = task?.actions?.filter((a) => a.status === 'proposed') || []
+  const history = task?.actions?.filter((a) => a.status !== 'proposed') || []
+  const due = task ? dueState(task.due_date, task.status) : null
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={onClose}>
-      <div className="h-full w-full max-w-3xl overflow-y-auto bg-slate-50 p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <StatusBadge status={task.status} />
-            <h2 className="mt-2 text-xl font-bold text-slate-900">{task.title}</h2>
-            {task.summary && <p className="mt-1 text-sm text-slate-600">{task.summary}</p>}
+    <>
+      <div className="drawer-bg" onClick={onClose} />
+      <aside className="drawer" role="dialog" aria-label="Task">
+        <div className="dh">
+          <button className="dclose" onClick={onClose} aria-label="Close">&times;</button>
+          <div className="o">
+            {task ? `${PRIORITY_LABEL[task.priority]} priority${task.due_date ? `, due ${fmtDate(task.due_date)}` : ''}` : 'Reading ...'}
           </div>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:bg-slate-200"><X className="h-5 w-5" /></button>
+          <div className="t">{task?.title || ''}</div>
         </div>
+        {task && (
+          <div className="db">
+            <div className="o" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <StatusPill status={task.status} />
+              {due && <span className={`pill ${due.pill}`}>{due.label}</span>}
+            </div>
+            {task.summary && <p className="cap" style={{ marginTop: 8 }}>{task.summary}</p>}
+            {task.review_flag && <div className="note bad" style={{ marginTop: 10 }}>{task.review_flag}</div>}
 
-        {task.review_flag && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{task.review_flag}</div>
+            <div className="toolbar">
+              <button className="btn" disabled={busy || task.status === 'processing'}
+                onClick={() => act(() => api(`/tasks/${task.id}/run`, { method: 'POST' }), 'Queued. The team will start on it now.')}>Run the team again</button>
+              {task.status !== 'done' && (
+                <button className="btn" disabled={busy}
+                  onClick={() => act(() => api(`/tasks/${task.id}`, { method: 'PATCH', body: { status: 'done' } }), 'Task closed.')}>Close the task</button>
+              )}
+              <span className="spacer" />
+              <button className="btn danger" disabled={busy} onClick={() => {
+                if (confirm('Delete this task and everything the agents produced for it?'))
+                  act(() => api(`/tasks/${task.id}`, { method: 'DELETE' }).then(onClose), 'Deleted.')
+              }}>Delete</button>
+            </div>
+            <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`}>{msg?.text}</div>
+
+            <h3>Brief for the team</h3>
+            <textarea className="inp" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)}
+              placeholder="Context, people involved, numbers, what good looks like" aria-label="Brief for the team" />
+            {notes !== (task.notes || '') && (
+              <div className="toolbar">
+                <button className="btn primary" disabled={busy} onClick={() => act(() => api(`/tasks/${task.id}`, { method: 'PATCH', body: { notes } }), 'Brief saved.')}>Save brief</button>
+                <button className="btn" onClick={() => setNotes(task.notes || '')}>Cancel</button>
+              </div>
+            )}
+
+            {open.length > 0 && (<>
+              <h3>Questions for you</h3>
+              {open.map((q) => <QuestionItem key={q.id} q={q} onDone={refresh} showTask={false} />)}
+            </>)}
+
+            {live.length > 0 && (<>
+              <h3>Ready for your approval</h3>
+              {live.map((a) => <ActionItem key={a.id} a={a} onDone={refresh} showTask={false} />)}
+            </>)}
+
+            {task.status !== 'done' && (<>
+              <h3>Tell the team what to change</h3>
+              <textarea className="inp" rows={2} value={feedback} onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Make the email firmer and mention the 30-day notice period" aria-label="Feedback for the team" />
+              <div className="toolbar">
+                <button className="btn primary" disabled={busy || !feedback.trim()} onClick={() => act(() =>
+                  api(`/tasks/${task.id}/feedback`, { method: 'POST', body: { text: feedback } }).then(() => setFeedback('')), 'Sent. The team will rework it.')}>
+                  Send and rework
+                </button>
+              </div>
+            </>)}
+
+            {answered.length > 0 && (<>
+              <h3>Answered</h3>
+              <ul className="log">
+                {answered.map((q) => (
+                  <li key={q.id}><div>{q.question}</div><div className="cap" style={{ margin: 0 }}>{q.status === 'dismissed' ? 'Skipped: the team used its judgement' : q.answer}</div></li>
+                ))}
+              </ul>
+            </>)}
+
+            {history.length > 0 && (<>
+              <h3>Earlier actions</h3>
+              {history.map((a) => <ActionItem key={a.id} a={a} onDone={refresh} showTask={false} />)}
+            </>)}
+
+            <h3>How the team worked</h3>
+            {task.events?.length ? (
+              <ul className="log">{task.events.map((e) => <EventRow key={e.id} e={e} />)}</ul>
+            ) : <p className="cap">Nothing yet. The team has not picked this up.</p>}
+          </div>
         )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Btn disabled={busy || task.status === 'processing'} onClick={() => act(() => api(`/tasks/${task.id}/run`, { method: 'POST' }), 'Queued for the team')}>
-            <Play className="h-4 w-4" />Re-run agents
-          </Btn>
-          {task.status !== 'done' && (
-            <Btn disabled={busy} onClick={() => act(() => api(`/tasks/${task.id}`, { method: 'PATCH', body: { status: 'done' } }), 'Task closed')}>
-              <CheckCheck className="h-4 w-4" />Mark task done
-            </Btn>
-          )}
-          <Btn disabled={busy} onClick={() => {
-            if (confirm('Delete this task and everything the agents produced for it?'))
-              act(() => api(`/tasks/${task.id}`, { method: 'DELETE' }).then(onClose), 'Deleted')
-          }}>
-            <Trash2 className="h-4 w-4" />Delete
-          </Btn>
-        </div>
-
-        <Section title="Brief for the team">
-          <textarea className="w-full rounded-lg border border-slate-300 p-2 text-sm" rows={4} value={notes}
-            onChange={(e) => setNotes(e.target.value)} placeholder="Context, constraints, who is involved, what good looks like" />
-          {notes !== (task.notes || '') && (
-            <Btn primary disabled={busy} onClick={() => act(() => api(`/tasks/${task.id}`, { method: 'PATCH', body: { notes } }), 'Notes saved')}>Save notes</Btn>
-          )}
-        </Section>
-
-        {open.length > 0 && (
-          <Section title="Questions for you">
-            <div className="space-y-3">{open.map((q) => <QuestionCard key={q.id} q={q} onDone={refresh} showTask={false} />)}</div>
-          </Section>
-        )}
-
-        {live.length > 0 && (
-          <Section title="Ready for approval">
-            <div className="space-y-3">{live.map((a) => <ActionCard key={a.id} a={a} onDone={refresh} showTask={false} />)}</div>
-          </Section>
-        )}
-
-        <Section title="Tell the team what to change">
-          <textarea className="w-full rounded-lg border border-slate-300 p-2 text-sm" rows={2} value={feedback}
-            onChange={(e) => setFeedback(e.target.value)} placeholder="e.g. Make the email firmer and mention the 30-day notice period" />
-          <Btn primary disabled={busy || !feedback.trim()} onClick={() => act(() =>
-            api(`/tasks/${task.id}/feedback`, { method: 'POST', body: { text: feedback } }).then(() => setFeedback('')), 'Sent. The team will rework it.')}>
-            Send and rework
-          </Btn>
-        </Section>
-
-        {answered.length > 0 && (
-          <Section title="Answered questions">
-            <ul className="space-y-2 text-sm">
-              {answered.map((q) => (
-                <li key={q.id} className="rounded-lg bg-white p-3">
-                  <div className="text-slate-900">{q.question}</div>
-                  <div className="text-slate-500">{q.status === 'dismissed' ? 'Skipped' : q.answer}</div>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {history.length > 0 && (
-          <Section title="Earlier actions">
-            <div className="space-y-3">{history.map((a) => <ActionCard key={a.id} a={a} onDone={refresh} showTask={false} />)}</div>
-          </Section>
-        )}
-
-        <Section title="How the team worked">
-          <ol className="space-y-2">{task.events?.map((e) => <EventRow key={e.id} e={e} />)}</ol>
-        </Section>
-      </div>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="mt-6 space-y-2">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
-      {children}
-    </section>
+      </aside>
+    </>
   )
 }
 
@@ -154,17 +154,17 @@ function EventRow({ e }: { e: AgentEvent }) {
   let text = ''
   if (e.kind === 'worker') text = `${c.summary || 'Worked on the draft'}${c.actions ? ` (${c.actions.length} action${c.actions.length === 1 ? '' : 's'})` : ''}`
   else if (e.kind === 'review') text = `${c.approved ? 'Approved' : 'Sent back'} at ${c.score}/10. ${c.feedback || ''}`
-  else if (e.kind === 'question') text = `Asked: ${(c.questions || []).map((q: any) => q.question).join(' | ')}`
-  else if (e.kind === 'answer') text = `Answered "${c.question}": ${c.answer}`
+  else if (e.kind === 'question') text = `Asked you: ${(c.questions || []).map((q: any) => q.question).join(' | ')}`
+  else if (e.kind === 'answer') text = `You answered "${c.question}": ${c.answer}`
   else if (e.kind === 'feedback') text = c.text
   else if (e.kind === 'error') text = c.error
-  else if (e.kind === 'status') text = `Status: ${c.status}${c.reason ? ` (${c.reason})` : ''}${c.action ? ` - ${c.action}` : ''}`
+  else if (e.kind === 'status') text = `${c.status === 'queued' ? 'Queued' : `Now ${c.status}`}${c.reason ? `: ${c.reason}` : ''}${c.action ? `, ${c.action}` : ''}`
   return (
-    <li className={`rounded-lg p-2.5 text-sm ${e.kind === 'error' ? 'bg-red-50 text-red-800' : 'bg-white text-slate-700'}`}>
-      <span className="font-medium text-slate-900">{e.actor}</span>
-      {e.attempt > 0 && <span className="ml-1 text-xs text-slate-400">round {e.attempt + 1}</span>}
-      <span className="ml-2 text-xs text-slate-400">{new Date(e.created_at).toLocaleString('en-GB')}</span>
-      <div className="mt-0.5 whitespace-pre-wrap">{text}</div>
+    <li className={e.kind === 'error' ? 'err' : ''}>
+      <span className="who">{e.actor === 'tom' ? 'You' : e.actor}</span>
+      {e.attempt > 0 && <span className="when">round {e.attempt + 1}</span>}
+      <span className="when">{fmtDateTime(e.created_at)}</span>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
     </li>
   )
 }

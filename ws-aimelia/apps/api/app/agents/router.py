@@ -102,6 +102,11 @@ class ReorderIn(BaseModel):
     ids: List[str]
 
 
+class CaptureIn(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    run_now: bool = True
+
+
 class PipelinePatch(BaseModel):
     max_revisions: Optional[int] = Field(default=None, ge=0, le=5)
     approval_threshold: Optional[float] = Field(default=None, ge=0, le=10)
@@ -109,6 +114,7 @@ class PipelinePatch(BaseModel):
     auto_run: Optional[bool] = None
     run_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
     house_rules: Optional[str] = None
+    team_directory: Optional[str] = None
 
 
 # ---------------------------------------------------------------- serialisers
@@ -162,7 +168,8 @@ def agent_out(a: AgentConfig) -> Dict[str, Any]:
 def pipeline_out(p) -> Dict[str, Any]:
     return {"max_revisions": p.max_revisions, "approval_threshold": p.approval_threshold,
             "max_questions_per_run": p.max_questions_per_run, "auto_run": p.auto_run,
-            "run_interval_minutes": p.run_interval_minutes, "house_rules": p.house_rules}
+            "run_interval_minutes": p.run_interval_minutes, "house_rules": p.house_rules,
+            "team_directory": p.team_directory or ""}
 
 
 # ---------------------------------------------------------------- helpers
@@ -233,6 +240,24 @@ def create_task(body: TaskIn, background: BackgroundTasks, db: Session = Depends
     if body.run_now:
         background.add_task(orchestrator.process_queue, 5)
     return task_out(task, full=True)
+
+
+@router.post("/capture", status_code=201)
+def capture(body: CaptureIn, background: BackgroundTasks, db: Session = Depends(get_db)):
+    """Brain dump: split free text into separate tasks and queue them all."""
+    orchestrator.seed_defaults(db)
+    try:
+        items = orchestrator.split_capture(db, body.text)
+    except llm.LLMError as e:
+        raise HTTPException(502, f"Could not split that into tasks: {e}")
+    if not items:
+        raise HTTPException(422, "No tasks found in that text.")
+    tasks = [AgentTask(status="queued", **item) for item in items]
+    db.add_all(tasks)
+    db.commit()
+    if body.run_now:
+        background.add_task(orchestrator.process_queue, 20)
+    return [task_out(t) for t in tasks]
 
 
 @router.get("/tasks/{task_id}")

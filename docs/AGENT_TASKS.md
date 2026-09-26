@@ -4,6 +4,25 @@ A to-do list worked by a team of AI agents. Tom adds tasks; the team plans them,
 checks it, and asks questions only when blocked. On login, `/tasks` shows the briefing: questions to answer
 and reviewed actions ready to approve.
 
+## Getting the list in
+
+- Brain dump: paste everything on your mind as one block. It is split into separate tasks, each queued for
+  the team (`POST /todo/capture`).
+- One task: a title plus a brief. The fuller the brief, the fewer questions come back.
+
+## Triage: the agent that shrinks the list
+
+Triage runs first on every task and gives one verdict:
+
+- DO: only Tom can do it. The rest of the team prepares everything so Tom's part takes minutes.
+- DELEGATE to a named person from the team directory: produces a "Hand over" action holding the message to
+  send, the outcome wanted, the deadline, the authority given and when to report back. Tom approves it, copies
+  it and sends it himself.
+- DEFER to a date, or DROP with the reason and the risk of not doing it.
+
+Fill in the team directory (Agent team tab, one person per line: name, role, what they own) or Triage can only
+name roles. Triage never stops to ask questions; it states its assumptions.
+
 ## How a task flows
 
 ```
@@ -40,8 +59,18 @@ Tom adds task ──> queued
 - How the team works: send-back limit, approval score, questions per run, background interval, and house
   rules shared with every agent.
 
-The default team is Planner, Chief of Staff, Hospitality Finance Specialist (off by default) and Reviewer.
-"Reset to default team" restores it.
+The default team is Triage, Planner, Chief of Staff, Hospitality Finance Specialist (off by default) and
+Reviewer. "Reset to the default team" restores it. When a release adds a new default agent, an existing team is
+offered it once, at the front of the line; an agent Tom deleted is never brought back.
+
+## House style
+
+`/tasks` follows the Williams, Stanley & Co house style for internal apps. The source of truth is `BRANDING.md`
+in payrollcommandcenter, applied as in WSCIP (`docs/style.md`, `build/parts/head.html`). The tokens and
+components are copied into `frontend/app/tasks/house.css`; the logo and favicon are in `frontend/public/assets`.
+Change the palette there first, then here. Status pills keep their house meanings: Ready to approve is On track
+green, Needs your answer is At risk amber, Failed and past due are Overdue red, and due states are worked out from
+the date rather than typed.
 
 ## Deploying
 
@@ -60,7 +89,7 @@ Tables are created automatically on startup. Frontend (Vercel) needs no new vari
 
 ## API
 
-All under `/todo`, header `X-Aimelia-Key` required. Main endpoints: `GET /briefing`, `GET|POST /tasks`,
+All under `/todo`, header `X-Aimelia-Key` required. Main endpoints: `GET /briefing`, `GET|POST /tasks`, `POST /capture`,
 `GET|PATCH|DELETE /tasks/{id}`, `POST /tasks/{id}/run`, `POST /tasks/{id}/feedback`,
 `POST /questions/{id}/answer|dismiss`, `PATCH /actions/{id}`, `POST /actions/{id}/approve|reject|done`,
 `GET|POST /agents`, `PATCH|DELETE /agents/{id}`, `POST /agents/reorder`, `POST /agents/reset`,

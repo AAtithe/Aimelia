@@ -79,7 +79,8 @@ def test_requires_access_key(client):
 def test_default_team_is_seeded(client):
     data = client.get("/todo/agents", headers=H).json()
     names = {a["name"]: a for a in data["agents"]}
-    assert {"Planner", "Chief of Staff", "Reviewer", "Hospitality Finance Specialist"} <= set(names)
+    assert {"Triage", "Planner", "Chief of Staff", "Reviewer", "Hospitality Finance Specialist"} <= set(names)
+    assert names["Triage"]["can_ask_questions"] is False
     assert names["Reviewer"]["role"] == "reviewer"
     assert names["Hospitality Finance Specialist"]["enabled"] is False
     assert names["Planner"]["resolved_provider"] == "mock"  # no keys configured
@@ -87,7 +88,8 @@ def test_default_team_is_seeded(client):
 
 
 def test_happy_path_workers_then_reviewer_approves(client, monkeypatch):
-    fake = ScriptedLLM(worker=[{"summary": "planned", "actions": [action("Plan", "checklist")], "questions": []},
+    fake = ScriptedLLM(worker=[{"summary": "DO", "actions": None, "questions": []},
+                               {"summary": "planned", "actions": [action("Plan", "checklist")], "questions": []},
                                {"summary": "done", "actions": [action()], "questions": []}],
                        reviewer=[approve()])
     monkeypatch.setattr(llm, "complete_json", fake)
@@ -98,9 +100,10 @@ def test_happy_path_workers_then_reviewer_approves(client, monkeypatch):
     assert got["status"] == "ready"
     assert [a["title"] for a in got["actions"]] == ["Email to supplier"]  # second worker replaced the draft
     assert got["actions"][0]["review_status"] == "approved"
-    assert [c["role"] for c in fake.calls] == ["worker", "worker", "reviewer"]
-    # the second worker saw the first worker's draft
-    assert fake.calls[1]["payload"]["draft_actions"][0]["title"] == "Plan"
+    assert [c["agent"] for c in fake.calls[:3]] == ["Triage", "Planner", "Chief of Staff"]
+    assert [c["role"] for c in fake.calls] == ["worker", "worker", "worker", "reviewer"]
+    # the third worker saw the second worker's draft
+    assert fake.calls[2]["payload"]["draft_actions"][0]["title"] == "Plan"
     # house rules and the JSON contract are always appended to the agent's instructions
     assert "House rules" in fake.calls[0]["system"] and '"actions"' in fake.calls[0]["system"]
 
@@ -117,8 +120,8 @@ def test_reviewer_sends_work_back_with_feedback(client, monkeypatch):
     orchestrator.process_queue()
 
     roles = [c["role"] for c in fake.calls]
-    assert roles == ["worker", "worker", "reviewer", "worker", "worker", "reviewer"]
-    rework = fake.calls[3]["payload"]["reviewer_feedback"]
+    assert roles == ["worker"] * 3 + ["reviewer"] + ["worker"] * 3 + ["reviewer"]
+    rework = fake.calls[4]["payload"]["reviewer_feedback"]
     assert rework["reviews"][0]["feedback"] == "Add the notice period"
     got = client.get(f"/todo/tasks/{task['id']}", headers=H).json()
     assert got["status"] == "ready" and got["review_flag"] is None
@@ -158,7 +161,8 @@ def test_questions_pause_then_answers_resume(client, monkeypatch):
 
     got = client.get(f"/todo/tasks/{task['id']}", headers=H).json()
     assert got["status"] == "needs_input"
-    assert len(fake.calls) == 1  # later agents did not run while blocked
+    # Triage may not ask, so it carried on; the Planner asked and the rest did not run
+    assert [c["agent"] for c in fake.calls] == ["Triage", "Planner"]
     brief = client.get("/todo/briefing", headers=H).json()
     assert brief["questions"][0]["question"] == "Who is the supplier?"
 
@@ -215,7 +219,7 @@ def test_custom_team_order_and_new_agents(client, monkeypatch):
     create(client)
     orchestrator.process_queue()
     ran = [(c["role"], c["agent"]) for c in fake.calls]
-    assert ran[0] == ("worker", "Chief of Staff")
+    assert ran[:2] == [("worker", "Triage"), ("worker", "Chief of Staff")]
     assert [r for r, _ in ran].count("reviewer") == 2  # Reviewer + Legal Checker
 
 
@@ -264,6 +268,73 @@ def test_mock_provider_end_to_end(client):
     client.post(f"/todo/questions/{got['questions'][0]['id']}/answer", json={"answer": "Save 15%"}, headers=H)
     orchestrator.process_queue()
     assert client.get(f"/todo/tasks/{task['id']}", headers=H).json()["status"] == "ready"
+
+
+def test_triage_delegation_uses_team_directory(client, monkeypatch):
+    handover = {"kind": "delegate", "title": "Hand to Mandy: chase P60s",
+                "content": "Mandy, please own this.", "details": {"owner": "Mandy", "due": "2026-10-02"}}
+    fake = ScriptedLLM(worker=[{"summary": "DELEGATE to Mandy", "actions": [handover], "questions": []},
+                               {"summary": "kept", "actions": None, "questions": []}],
+                       reviewer=[approve()])
+    monkeypatch.setattr(llm, "complete_json", fake)
+    client.patch("/todo/pipeline", json={"team_directory": "Mandy, Payroll Manager, payroll runs"}, headers=H)
+    task = create(client, title="Chase P60s")
+    orchestrator.process_queue()
+    assert fake.calls[0]["payload"]["team_directory"] == "Mandy, Payroll Manager, payroll runs"
+    got = client.get(f"/todo/tasks/{task['id']}", headers=H).json()
+    assert got["actions"][0]["kind"] == "delegate"
+    assert got["actions"][0]["details"]["owner"] == "Mandy"
+
+
+def test_capture_splits_brain_dump(client, monkeypatch):
+    def fake(**kw):
+        assert kw["role"] == "capture"
+        return {"tasks": [{"title": "Sign off Corrigans tronc", "notes": "Q3", "priority": 1, "due_date": "2026-10-01"},
+                          {"title": "", "notes": "junk"},
+                          {"title": "Book Bentleys review", "priority": "x", "due_date": "next week"}]}
+    monkeypatch.setattr(llm, "complete_json", fake)
+    r = client.post("/todo/capture", json={"text": "tronc corrigans, bentleys review", "run_now": False}, headers=H)
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert [t["title"] for t in out] == ["Sign off Corrigans tronc", "Book Bentleys review"]
+    assert out[0]["priority"] == 1 and out[0]["due_date"] == "2026-10-01"
+    assert out[1]["priority"] == 2 and out[1]["due_date"] is None
+    assert all(t["status"] == "queued" for t in out)
+
+
+def test_capture_mock_splits_lines(client):
+    r = client.post("/todo/capture", json={"text": "- one\n2. two\n\n* three", "run_now": False}, headers=H)
+    assert [t["title"] for t in r.json()] == ["one", "two", "three"]
+
+
+def test_existing_team_is_offered_new_default_agents_once(client):
+    from app.db import SessionLocal
+    from app.agents.defaults import DEFAULT_AGENTS
+    db = SessionLocal()
+    # an install from before Triage existed: version 0, no Triage, Planner deleted by Tom
+    db.add(models.AgentPipelineSettings(id=1, house_rules="x", defaults_version=0))
+    for spec in DEFAULT_AGENTS:
+        if spec.get("since", 0) == 0 and spec["name"] != "Planner":
+            db.add(models.AgentConfig(**{k: v for k, v in spec.items() if k != "since"}))
+    db.commit()
+    db.close()
+    names = [a["name"] for a in client.get("/todo/agents", headers=H).json()["agents"]]
+    assert "Triage" in names and "Planner" not in names  # deleted agents stay deleted
+    workers = [a for a in client.get("/todo/agents", headers=H).json()["agents"] if a["role"] == "worker"]
+    assert workers[0]["name"] == "Triage"  # joins at the front of the line
+    triage = next(a for a in workers if a["name"] == "Triage")
+    client.delete(f"/todo/agents/{triage['id']}", headers=H)
+    names = [a["name"] for a in client.get("/todo/agents", headers=H).json()["agents"]]
+    assert "Triage" not in names  # not offered again
+
+
+def test_ensure_schema_adds_missing_columns():
+    from sqlalchemy import inspect, text
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE agent_pipeline_settings DROP COLUMN team_directory"))
+    assert "team_directory" not in {c["name"] for c in inspect(engine).get_columns("agent_pipeline_settings")}
+    models.ensure_schema(engine)
+    assert "team_directory" in {c["name"] for c in inspect(engine).get_columns("agent_pipeline_settings")}
 
 
 def test_parse_json_tolerates_fences():

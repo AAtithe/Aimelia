@@ -85,6 +85,7 @@ export interface Pipeline {
   auto_run: boolean
   run_interval_minutes: number
   house_rules: string
+  team_directory: string
 }
 
 export interface Briefing {
@@ -141,19 +142,20 @@ export async function api<T = any>(path: string, options: { method?: string; bod
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   queued: 'Queued',
   processing: 'Agents working',
-  needs_input: 'Needs your input',
-  ready: 'Ready for approval',
+  needs_input: 'Needs your answer',
+  ready: 'Ready to approve',
   done: 'Done',
   failed: 'Failed',
 }
 
-export const STATUS_STYLE: Record<TaskStatus, string> = {
-  queued: 'bg-slate-100 text-slate-700',
-  processing: 'bg-blue-100 text-blue-800',
-  needs_input: 'bg-amber-100 text-amber-800',
-  ready: 'bg-emerald-100 text-emerald-800',
-  done: 'bg-slate-200 text-slate-500',
-  failed: 'bg-red-100 text-red-800',
+// House pill classes (see app/tasks/house.css). Colour is meaning, not decoration.
+export const STATUS_PILL: Record<TaskStatus, string> = {
+  queued: 'Unscheduled',
+  processing: 'Active',
+  needs_input: 'Atrisk',
+  ready: 'Ontrack',
+  done: 'Done',
+  failed: 'Overdue',
 }
 
 export const KIND_LABEL: Record<string, string> = {
@@ -161,6 +163,31 @@ export const KIND_LABEL: Record<string, string> = {
   document: 'Document',
   checklist: 'Checklist',
   decision: 'Decision',
-  call: 'Call / meeting',
+  call: 'Call or meeting',
+  delegate: 'Hand over',
   note: 'Note',
+}
+
+export const PRIORITY_LABEL = ['', 'High', 'Normal', 'Low']
+
+/** "26 Sept 2026", the house date format. */
+export function fmtDate(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value.length === 10 ? `${value}T12:00:00` : value)
+  return isNaN(d.getTime()) ? value : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+export function fmtDateTime(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value)
+  return `${fmtDate(value)} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`
+}
+
+/** Due state is derived from the date, never typed: overdue, due today, or on track. */
+export function dueState(due: string | null, status: TaskStatus): { pill: string; label: string } | null {
+  if (!due || status === 'done') return null
+  const today = new Date().toISOString().slice(0, 10)
+  if (due < today) return { pill: 'Overdue', label: 'Overdue' }
+  if (due === today) return { pill: 'Atrisk', label: 'Due today' }
+  return null
 }

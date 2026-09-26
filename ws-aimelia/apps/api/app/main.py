@@ -29,6 +29,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to create database tables: {e}")
     
+    try:
+        _agent_models.ensure_schema(engine)
+    except Exception as e:
+        logger.error(f"Agent schema upgrade failed: {e}")
+
     agent_task = None
     if settings.AGENT_LOOP_IN_API:
         from .agents.runner import agent_loop

@@ -20,14 +20,14 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from . import llm
-from .defaults import (DEFAULT_AGENTS, DEFAULT_HOUSE_RULES, REVIEWER_CONTRACT,
-                       WORKER_CONTRACT, WORKER_CONTRACT_NO_QUESTIONS)
+from .defaults import (CAPTURE_PROMPT, DEFAULT_AGENTS, DEFAULT_HOUSE_RULES, DEFAULTS_VERSION,
+                       REVIEWER_CONTRACT, WORKER_CONTRACT, WORKER_CONTRACT_NO_QUESTIONS)
 from .models import (AgentAction, AgentConfig, AgentEvent, AgentPipelineSettings,
                      AgentQuestion, AgentTask)
 
 logger = logging.getLogger(__name__)
 
-ACTION_KINDS = {"email_draft", "document", "checklist", "decision", "call", "note"}
+ACTION_KINDS = {"email_draft", "document", "checklist", "decision", "call", "delegate", "note"}
 
 
 def now() -> dt.datetime:
@@ -37,14 +37,27 @@ def now() -> dt.datetime:
 # ---------------------------------------------------------------- setup
 
 def seed_defaults(db: Session, force: bool = False) -> None:
-    """Create the default team and settings if they do not exist yet."""
+    """Create the default team and settings, and offer default agents added since the last visit."""
     if force:
         db.query(AgentConfig).delete()
-    if db.query(AgentConfig).count() == 0:
+    pipeline = db.get(AgentPipelineSettings, 1)
+    if pipeline is None:
+        pipeline = AgentPipelineSettings(id=1, house_rules=DEFAULT_HOUSE_RULES, defaults_version=0)
+        db.add(pipeline)
+    seen = 0 if force else (pipeline.defaults_version or 0)
+    fresh = force or db.query(AgentConfig).count() == 0
+    if fresh or seen < DEFAULTS_VERSION:
+        names = {a.name for a in db.query(AgentConfig).all()}
+        lowest = min([a.position for a in db.query(AgentConfig).filter(AgentConfig.role == "worker")], default=0)
         for spec in DEFAULT_AGENTS:
+            spec = dict(spec)
+            since = spec.pop("since", 0)
+            if spec["name"] in names or (not fresh and since <= seen):
+                continue
+            if not fresh:  # joining an existing team: put it first rather than clash on position
+                spec["position"] = lowest - 1
             db.add(AgentConfig(**{"enabled": True, **spec}))
-    if db.get(AgentPipelineSettings, 1) is None:
-        db.add(AgentPipelineSettings(id=1, house_rules=DEFAULT_HOUSE_RULES))
+        pipeline.defaults_version = DEFAULTS_VERSION
     db.commit()
 
 
@@ -99,7 +112,7 @@ def _clean_questions(raw: Any) -> List[Dict[str, str]]:
     return out
 
 
-def build_context(task: AgentTask) -> Dict[str, Any]:
+def build_context(task: AgentTask, team_directory: str = "") -> Dict[str, Any]:
     """What every agent sees about the task."""
     answered = [{"question": q.question, "answer": q.answer}
                 for q in task.questions if q.status == "answered"]
@@ -114,6 +127,7 @@ def build_context(task: AgentTask) -> Dict[str, Any]:
         "questions_tom_declined": dismissed,
         "tom_feedback": feedback,
         "previous_actions": previous,
+        "team_directory": team_directory or "(not filled in yet: name roles rather than people)",
     }
 
 
@@ -132,7 +146,7 @@ def run_task(db: Session, task: AgentTask) -> str:
 
     task.run_count = (task.run_count or 0) + 1
     task.last_run_at = now()
-    context = build_context(task)
+    context = build_context(task, pipeline.team_directory or "")
     draft: List[Dict[str, Any]] = []
     reviewer_feedback: Optional[Dict[str, Any]] = None
     last_review: Dict[str, Any] = {}
@@ -244,6 +258,30 @@ def _save_actions(db: Session, task: AgentTask, draft: List[Dict[str, Any]], app
     log_event(db, task, "status", "orchestrator", {"status": task.status, "approved": approved,
                                                    "actions": len(draft)})
     return task.status
+
+
+# ---------------------------------------------------------------- capture
+
+def split_capture(db: Session, text: str) -> List[Dict[str, Any]]:
+    """Turn a free-text brain dump into separate tasks."""
+    pipeline = get_pipeline(db)
+    reply = llm.complete_json(provider="auto", model=None, role="capture",
+                              system=f"{CAPTURE_PROMPT}\n\nHouse rules:\n{pipeline.house_rules or ''}",
+                              payload={"brain_dump": text, "today": dt.date.today().isoformat()},
+                              temperature=0.2)
+    tasks = []
+    for t in reply.get("tasks") or []:
+        if not isinstance(t, dict) or not str(t.get("title") or "").strip():
+            continue
+        try:
+            priority = min(max(int(t.get("priority") or 2), 1), 3)
+        except (TypeError, ValueError):
+            priority = 2
+        due = t.get("due_date")
+        due = due if isinstance(due, str) and len(due) == 10 else None
+        tasks.append({"title": str(t["title"]).strip()[:500], "notes": str(t.get("notes") or ""),
+                      "priority": priority, "due_date": due})
+    return tasks
 
 
 # ---------------------------------------------------------------- queue

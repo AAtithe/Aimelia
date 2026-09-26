@@ -139,3 +139,4 @@ venv.bak/
 
 # TypeScript incremental build
 *.tsbuildinfo
+!frontend/public/
