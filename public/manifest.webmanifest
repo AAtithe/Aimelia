@@ -1,0 +1,11 @@
+{
+  "name": "Aimelia | Williams, Stanley & Co",
+  "short_name": "Aimelia",
+  "description": "Your to-do list, worked by a team of agents.",
+  "start_url": "/today",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F2F4F6",
+  "theme_color": "#003359",
+  "icons": [{ "src": "/assets/favicon.png", "sizes": "186x186", "type": "image/png", "purpose": "any" }]
+}

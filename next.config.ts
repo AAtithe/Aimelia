@@ -3,6 +3,8 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Local development database; loaded as-is so its WebAssembly is not bundled.
+  serverExternalPackages: ['@electric-sql/pglite'],
   async headers() {
     return [
       {

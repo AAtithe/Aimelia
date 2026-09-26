@@ -24,7 +24,7 @@ describe('every endpoint needs access', () => {
       const handler = dispatcher(prefix, [...endpoints]) as any
       for (const [method, pattern] of endpoints) {
         const p = pattern.replace(/:[a-z_]+/gi, 'x')
-        for (const headers of [{}, { 'x-aimelia-key': 'wrong' }, { cookie: 'aimelia_session=forged.123.abc' }]) {
+        for (const headers of [{}, { 'x-aimelia-key': 'wrong' }, { cookie: 'aimelia_session=forged.123.abc' }] as Record<string, string>[]) {
           const r = await call(handler, { method, path: `${prefix}${p}`, headers, body: method === 'GET' ? undefined : {} })
           expect(r.status, `${method} ${prefix}${pattern}`).toBe(401)
         }

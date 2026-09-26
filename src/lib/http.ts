@@ -22,7 +22,7 @@ export const fail = (status: number, message: string): never => {
 type Ctx<P> = { params: Promise<P> }
 type Handler<P> = (req: Request, params: P) => Promise<unknown>
 
-export function route<P = Record<string, string>>(fn: Handler<P>, opts: { public?: boolean } = {}) {
+export function route<P = any>(fn: Handler<P>, opts: { public?: boolean } = {}) {
   return async (req: Request, ctx: Ctx<P>) => {
     try {
       if (!opts.public) {

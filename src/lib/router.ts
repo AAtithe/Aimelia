@@ -14,7 +14,7 @@ export function dispatcher(prefix: string, endpoints: Endpoint[], opts: { public
     const re = new RegExp(`^${pattern.replace(/:[a-zA-Z_]+/g, (m) => { names.push(m.slice(1)); return '([^/]+)' })}$`)
     return { method, re, names, handler }
   })
-  return route(async (req) => {
+  return route<any>(async (req) => {
     const path = new URL(req.url).pathname.slice(prefix.length) || '/'
     let pathMatched = false
     for (const e of compiled) {

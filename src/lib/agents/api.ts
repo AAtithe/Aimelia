@@ -7,7 +7,8 @@ import { body, fail } from '../http'
 import { availableProviders, DEFAULT_MODELS, resolveModel, resolveProvider } from '../llm'
 import { addDays, isYmd, londonToday } from '../dates'
 import { runLater, type Endpoint } from '../router'
-import { graph } from '../microsoft'
+import { connection, graph } from '../microsoft'
+import { env } from '../env'
 import { bookFocus, CalendarError } from './calendarBlocks'
 import { learningStats, recordLesson } from './lessons'
 import { buildBrief, channels, send } from './notify'
@@ -143,6 +144,17 @@ export const SUGGESTED_ROUTINES = [
 // ---------------------------------------------------------------- endpoints
 
 export const todoEndpoints: Endpoint[] = [
+  // What is configured, as yes/no only. Never returns a value.
+  ['GET', '/setup', async () => {
+    const ms = await connection().catch(() => ({ connected: false, account: null }))
+    return {
+      access_key: !!env.accessKey(), encryption_key: (env.encryptionKey() || '').length >= 32, owner_email: env.ownerEmails().length > 0,
+      cron_secret: !!env.cronSecret(), microsoft_app: !!(env.msTenant() && env.msClientId() && env.msClientSecret()), microsoft_connected: ms.connected,
+      microsoft_account: ms.account, ai: availableProviders(), channels: channels(), sources: configuredSources(), app_url: env.appUrl(),
+      redirect_uri: `${env.appUrl()}/api/auth/callback`,
+    }
+  }],
+
   ['GET', '/briefing', async () => {
     await seedDefaults()
     const [questions, actions, failed, followUps, counts] = await Promise.all([

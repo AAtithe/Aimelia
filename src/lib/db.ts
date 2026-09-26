@@ -23,6 +23,13 @@ function exec(): Executor {
   if (executor) return executor
   const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
   if (!url) throw new Error('DATABASE_URL is not set. Connect a Neon Postgres database to the Vercel project.')
+  if (url.startsWith('pglite:')) {
+    // Local development only: a file-backed Postgres, no server needed (DATABASE_URL=pglite:./.data).
+    const dir = url.slice('pglite:'.length) || './.data'
+    const ready = import('@electric-sql/pglite').then(({ PGlite }) => new PGlite(dir))
+    executor = async (text, params = []) => (await (await ready).query(text, params as any[])).rows as Row[]
+    return executor
+  }
   const sql = neon(url)
   executor = async (text, params = []) => (await sql.query(text, params as any[])) as Row[]
   return executor
