@@ -133,3 +133,9 @@ venv.bak/
 
 # Vercel
 .vercel
+
+# Frontend shared code (not a Python build dir)
+!frontend/lib/
+
+# TypeScript incremental build
+*.tsbuildinfo

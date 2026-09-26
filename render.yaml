@@ -21,6 +21,10 @@ services:
         value: https://aimelia-api.onrender.com/auth/callback
       - key: OPENAI_API_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AIMELIA_ACCESS_KEY
+        sync: false
       - key: APP_BASE_URL
         value: https://aimelia-api.onrender.com
       - key: TIMEZONE

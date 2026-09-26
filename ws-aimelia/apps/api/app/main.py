@@ -10,6 +10,10 @@ from .meeting_prep_endpoints import router as prep_router
 from .scheduler_endpoints import router as scheduler_router
 from .debug_auth import router as debug_router
 from .setup import router as setup_router
+from .agents.router import router as todo_router
+from .agents import models as _agent_models  # noqa: F401 - registers agent tables
+from .settings import settings
+import asyncio
 from .db import Base, engine
 import logging
 
@@ -25,8 +29,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to create database tables: {e}")
     
+    agent_task = None
+    if settings.AGENT_LOOP_IN_API:
+        from .agents.runner import agent_loop
+        agent_task = asyncio.create_task(agent_loop())
+
     yield
-    
+
+    if agent_task:
+        agent_task.cancel()
     # Shutdown
     logger.info("Application shutting down")
 
@@ -47,7 +58,7 @@ app.add_middleware(
         "http://localhost:3000",  # For local development
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -61,6 +72,7 @@ app.include_router(prep_router, prefix="/prep", tags=["Meeting Preparation"])
 app.include_router(scheduler_router, prefix="/scheduler", tags=["Background Automation"])
 app.include_router(debug_router, tags=["Debug"])
 app.include_router(setup_router, prefix="/setup", tags=["Database Setup"])
+app.include_router(todo_router)
 
 @app.get("/")
 def root():
@@ -79,7 +91,8 @@ def root():
             "Meeting Preparation",
             "Star-Level Meeting Briefs",
             "Background Automation",
-            "Proactive AI Assistant"
+            "Proactive AI Assistant",
+            "Agentic Task List (multi-agent with reviewer)"
         ]
     }
 

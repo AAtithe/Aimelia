@@ -11,4 +11,9 @@ class Settings(BaseSettings):
     TIMEZONE: str = "Europe/London"
     ENCRYPTION_KEY: str | None = None  # Fernet encryption key for token storage
 
+    # Agentic task list
+    ANTHROPIC_API_KEY: str | None = None
+    AIMELIA_ACCESS_KEY: str | None = None  # required header X-Aimelia-Key for /todo endpoints
+    AGENT_LOOP_IN_API: bool = True  # run the background agent loop inside the API process
+
 settings = Settings()
