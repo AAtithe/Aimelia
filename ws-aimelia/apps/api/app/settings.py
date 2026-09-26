@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     AIMELIA_ACCESS_KEY: str | None = None  # required header X-Aimelia-Key for /todo endpoints
     AGENT_LOOP_IN_API: bool = True  # run the background agent loop inside the API process
     AIMELIA_APP_URL: str = "https://aimelia.vercel.app/tasks"  # linked from pushes and calendar blocks
+    AIMELIA_FRONTEND_URL: str = "https://aimelia.vercel.app"  # where Microsoft sign-in returns the browser
+    AIMELIA_OWNER_EMAIL: str | None = None  # the only account(s) allowed to connect Microsoft 365, comma-separated
 
     # Morning push (never email)
     TEAMS_WEBHOOK_URL: str | None = None  # Teams Workflows webhook for the channel or chat

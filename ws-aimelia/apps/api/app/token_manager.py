@@ -3,7 +3,7 @@ Secure Microsoft Graph token management with Fernet encryption.
 Handles token storage, retrieval, and automatic refresh.
 """
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
@@ -35,25 +35,21 @@ class TokenManager:
         self.token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
     
     def _encrypt_token(self, token: str) -> str:
-        """Encrypt a token using Fernet."""
-        if self.fernet:
-            try:
-                return self.fernet.encrypt(token.encode()).decode()
-            except Exception as e:
-                logger.error(f"Encryption failed: {e}")
-                return token  # Fallback to plain text
-        else:
-            # Fallback: store token in plain text if encryption is disabled
-            logger.warning("Storing token without encryption (ENCRYPTION_KEY not set)")
-            return token
-    
+        """Encrypt a token using Fernet. Refuses to store anything in plain text."""
+        if not self.fernet:
+            raise RuntimeError("ENCRYPTION_KEY is not set, so tokens cannot be stored safely.")
+        return self.fernet.encrypt(token.encode()).decode()
+
     def _decrypt_token(self, encrypted_token: str) -> str:
-        """Decrypt a token using Fernet."""
-        if self.fernet:
-            return self.fernet.decrypt(encrypted_token.encode()).decode()
-        else:
-            # Fallback: return token as-is if encryption is disabled
-            return encrypted_token
+        """Decrypt a token using Fernet. Anything stored before encryption was enforced fails and forces a new sign-in."""
+        if not self.fernet:
+            raise RuntimeError("ENCRYPTION_KEY is not set, so stored tokens cannot be read.")
+        return self.fernet.decrypt(encrypted_token.encode()).decode()
+
+    @staticmethod
+    def _utc(value: datetime) -> datetime:
+        """Postgres returns timezone-aware times and SQLite naive ones; compare both as UTC."""
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     
     async def store_tokens(self, db: Session, user_id: str, tokens: Dict[str, Any]) -> bool:
         """
@@ -69,19 +65,21 @@ class TokenManager:
         """
         try:
             access_token = tokens["access_token"]
-            refresh_token = tokens["refresh_token"]
-            expires_in = tokens.get("expires_in", 3600)  # Default to 1 hour
+            existing_token = db.query(UserToken).filter(UserToken.user_id == user_id).first()
+            # A refresh response may omit the refresh token; keep the one we have.
+            refresh_token = tokens.get("refresh_token") or (
+                self._decrypt_token(existing_token.encrypted_refresh_token) if existing_token else None)
+            if not refresh_token:
+                raise ValueError("No refresh token returned")
+            expires_in = int(tokens.get("expires_in", 3600))  # Default to 1 hour
             
             # Calculate expiration time (ensure it's always in the future)
             buffer_seconds = min(300, expires_in // 2)  # Use 5 min buffer or half the token lifetime, whichever is smaller
-            expires_at = datetime.utcnow() + timedelta(seconds=expires_in - buffer_seconds)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in - buffer_seconds)
             
             # Encrypt tokens
             encrypted_access = self._encrypt_token(access_token)
             encrypted_refresh = self._encrypt_token(refresh_token)
-            
-            # Check if user already has tokens
-            existing_token = db.query(UserToken).filter(UserToken.user_id == user_id).first()
             
             if existing_token:
                 # Update existing tokens
@@ -127,13 +125,10 @@ class TokenManager:
                 logger.warning(f"No tokens found for user {user_id}")
                 return None
             
-            # Check if token is still valid (with 5 minute buffer)
-            current_time = datetime.utcnow()
-            logger.info(f"Token expires at: {token_record.expires_at}, current time: {current_time}")
-            
-            if token_record.expires_at > current_time:
-                # Token is still valid, decrypt and return
-                logger.info(f"Token is still valid, returning decrypted token")
+            # The 5 minute safety margin is taken off expires_at when the token is stored.
+            # Comparing a naive time with Postgres's timezone-aware one used to raise here,
+            # which was swallowed below and read as "not signed in".
+            if self._utc(token_record.expires_at) > datetime.now(timezone.utc):
                 return self._decrypt_token(token_record.encrypted_access_token)
             
             # Token expired, try to refresh

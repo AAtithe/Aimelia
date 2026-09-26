@@ -25,6 +25,10 @@ services:
         sync: false
       - key: AIMELIA_ACCESS_KEY
         sync: false
+      - key: AIMELIA_OWNER_EMAIL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
       - key: AIMELIA_APP_URL
         value: https://aimelia.vercel.app/tasks
       - key: TEAMS_WEBHOOK_URL

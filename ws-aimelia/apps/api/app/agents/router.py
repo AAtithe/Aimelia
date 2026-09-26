@@ -4,7 +4,6 @@ REST API for the agentic task list, mounted at /todo.
 Every endpoint requires the X-Aimelia-Key header to match AIMELIA_ACCESS_KEY.
 """
 import datetime as dt
-import hmac
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -13,19 +12,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..settings import settings
+from ..security import require_access_key
 from . import calendar_blocks, lessons, llm, notify, orchestrator, schedule, sources
 from .models import (AgentAction, AgentConfig, AgentEvent, AgentLesson, AgentQuestion, AgentRoutine, AgentTask)
 
 logger = logging.getLogger(__name__)
-
-
-def require_access_key(x_aimelia_key: Optional[str] = Header(default=None)):
-    expected = settings.AIMELIA_ACCESS_KEY
-    if not expected:
-        raise HTTPException(503, "AIMELIA_ACCESS_KEY is not configured on the server.")
-    if not x_aimelia_key or not hmac.compare_digest(x_aimelia_key, expected):
-        raise HTTPException(401, "Invalid or missing access key.")
 
 
 router = APIRouter(prefix="/todo", tags=["Agentic Tasks"], dependencies=[Depends(require_access_key)])

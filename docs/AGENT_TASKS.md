@@ -111,13 +111,25 @@ Change the palette there first, then here. Status pills keep their house meaning
 green, Needs your answer is At risk amber, Failed and past due are Overdue red, and due states are worked out from
 the date rather than typed.
 
+## Security
+
+- Every API route needs `X-Aimelia-Key` except `/`, `/health`, `/auth/login` and `/auth/callback`. A test walks every
+  mounted route and fails if any other one answers without the key.
+- No route returns a Microsoft token. The browser only learns whether Aimelia is connected.
+- Sign-in is bound to the browser that started it (signed, ten-minute state plus a matching cookie), and the account
+  that signs in must be `AIMELIA_OWNER_EMAIL`, so nobody else in the tenant can connect their mailbox in Tom's place.
+- Tokens are encrypted at rest; there is no plain-text fallback.
+- Secrets live only in Render's environment. `ws-aimelia/.env` is no longer tracked.
+
 ## Deploying
 
 Backend (Render, `aimelia-api`), set these environment variables:
 
 | Variable | Purpose |
 |---|---|
-| `AIMELIA_ACCESS_KEY` | Required. Long random string; entered once in the browser to open `/tasks`. Every `/todo` call is refused until it is set. |
+| `AIMELIA_ACCESS_KEY` | Required. Long random string; entered once in the browser for `/tasks` and the dashboard. Every route except sign-in is refused until it is set. |
+| `AIMELIA_OWNER_EMAIL` | Required. The only Microsoft 365 account allowed to connect (comma-separate to allow more). |
+| `ENCRYPTION_KEY` | Required. Fernet key for tokens at rest (`python generate_encryption_key.py`). Without it Aimelia refuses to store a sign-in. |
 | `ANTHROPIC_API_KEY` | Claude models for the agents. |
 | `OPENAI_API_KEY` | Optional alternative or addition. |
 | `AGENT_LOOP_IN_API` | Default `true`: the API process works through the queue in the background. |

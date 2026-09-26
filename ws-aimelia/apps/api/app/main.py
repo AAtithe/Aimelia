@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .graph_auth import router as auth_router
@@ -8,11 +8,11 @@ from .simple_enhanced import router as enhanced_router
 from .smart_drafting_endpoints import router as drafting_router
 from .meeting_prep_endpoints import router as prep_router
 from .scheduler_endpoints import router as scheduler_router
-from .debug_auth import router as debug_router
 from .setup import router as setup_router
 from .agents.router import router as todo_router
 from .agents import models as _agent_models  # noqa: F401 - registers agent tables
 from .settings import settings
+from .security import require_access_key
 import asyncio
 from .db import Base, engine
 import logging
@@ -59,7 +59,6 @@ app.add_middleware(
     allow_origins=[
         "https://aimelia.vercel.app",
         "https://aimelia-git-main-williams-stanley.vercel.app",
-        "https://aimelia-g9vho0hsv-williams-stanley.vercel.app",
         "http://localhost:3000",  # For local development
     ],
     allow_credentials=True,
@@ -68,15 +67,18 @@ app.add_middleware(
 )
 
 # Include all routers
+# Every router except sign-in needs the access key: these routes act on Tom's
+# mailbox and calendar with his stored token, so an open route is an open mailbox.
+# auth_router protects its own routes apart from /auth/login and /auth/callback.
+protected = [Depends(require_access_key)]
 app.include_router(auth_router, tags=["Authentication"])
-app.include_router(email_router, tags=["Email Management"])
-app.include_router(cal_router, tags=["Calendar Management"])
-app.include_router(enhanced_router, prefix="/ai", tags=["Enhanced AI Features"])
-app.include_router(drafting_router, prefix="/draft", tags=["Smart Drafting"])
-app.include_router(prep_router, prefix="/prep", tags=["Meeting Preparation"])
-app.include_router(scheduler_router, prefix="/scheduler", tags=["Background Automation"])
-app.include_router(debug_router, tags=["Debug"])
-app.include_router(setup_router, prefix="/setup", tags=["Database Setup"])
+app.include_router(email_router, tags=["Email Management"], dependencies=protected)
+app.include_router(cal_router, tags=["Calendar Management"], dependencies=protected)
+app.include_router(enhanced_router, prefix="/ai", tags=["Enhanced AI Features"], dependencies=protected)
+app.include_router(drafting_router, prefix="/draft", tags=["Smart Drafting"], dependencies=protected)
+app.include_router(prep_router, prefix="/prep", tags=["Meeting Preparation"], dependencies=protected)
+app.include_router(scheduler_router, prefix="/scheduler", tags=["Background Automation"], dependencies=protected)
+app.include_router(setup_router, prefix="/setup", tags=["Database Setup"], dependencies=protected)
 app.include_router(todo_router)
 
 @app.get("/")
