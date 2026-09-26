@@ -147,4 +147,69 @@ export const SCHEMA: string[] = [
     ok boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // ---------------------------------------------------------------- email and calendar
+  `CREATE TABLE IF NOT EXISTS emails (
+    graph_id text PRIMARY KEY,
+    conversation_id text,
+    from_email text NOT NULL DEFAULT '',
+    from_name text NOT NULL DEFAULT '',
+    subject text NOT NULL DEFAULT '',
+    preview text NOT NULL DEFAULT '',
+    received_at timestamptz,
+    is_read boolean NOT NULL DEFAULT false,
+    category text NOT NULL DEFAULT 'General',
+    urgency int NOT NULL DEFAULT 3,
+    confidence real NOT NULL DEFAULT 0,
+    method text NOT NULL DEFAULT 'rules',
+    reasoning text NOT NULL DEFAULT '',
+    action_required text,
+    summary text,
+    suggested_reply text,
+    draft_id text,
+    draft_link text,
+    triaged_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS emails_received_idx ON emails (received_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS meetings (
+    graph_event_id text PRIMARY KEY,
+    subject text NOT NULL DEFAULT '',
+    start_at timestamptz,
+    end_at timestamptz,
+    attendees jsonb NOT NULL DEFAULT '[]'::jsonb,
+    organizer text NOT NULL DEFAULT '',
+    location text NOT NULL DEFAULT '',
+    is_online boolean NOT NULL DEFAULT false,
+    join_url text,
+    brief text,
+    brief_style text,
+    brief_word_count int,
+    recent_comms_count int NOT NULL DEFAULT 0,
+    brief_generated_at timestamptz
+  )`,
+  `CREATE TABLE IF NOT EXISTS kb_chunks (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    source text NOT NULL DEFAULT 'document',
+    source_id text,
+    title text NOT NULL,
+    chunk text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', title || ' ' || chunk)) STORED
+  )`,
+  `CREATE INDEX IF NOT EXISTS kb_chunks_tsv_idx ON kb_chunks USING gin (tsv)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS kb_chunks_source_idx ON kb_chunks (source, source_id, title)`,
+  `CREATE TABLE IF NOT EXISTS jobs (
+    id text PRIMARY KEY,
+    enabled boolean NOT NULL DEFAULT true,
+    options jsonb NOT NULL DEFAULT '{}'::jsonb,
+    last_run_at timestamptz,
+    last_slot text,
+    last_result jsonb
+  )`,
+  `CREATE TABLE IF NOT EXISTS job_logs (
+    id bigserial PRIMARY KEY,
+    job text NOT NULL,
+    level text NOT NULL DEFAULT 'info',
+    message text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  )`,
 ]

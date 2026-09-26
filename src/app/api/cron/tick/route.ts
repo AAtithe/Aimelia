@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server'
 import { cronAllowed } from '@/lib/auth'
 import { tick } from '@/lib/tick'
+import '@/lib/email/jobs' // registers the email jobs with the tick
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
