@@ -35,8 +35,8 @@ If the account cannot use Fable 5.1 (not offered to it, or its data retention se
 Opus 5 and stays there until the server restarts. A turn has a time budget: after 230 seconds it must reply, and no model
 call may run past 285 seconds, inside Vercel's 300. Each call gets one retry on an overload or rate limit.
 
-What it has to work with, besides the tools: the agent team's house rules, the team directory, and everything Tom has
-asked it to remember (`chat_memory`), in every conversation.
+What it has to work with, besides the tools: the agent team's house rules, the team directory, and from What Aimelia
+knows (below) the memories Tom set or checked, his standing preferences, and those that bear on his message.
 
 | Tool | What it does |
 |---|---|
