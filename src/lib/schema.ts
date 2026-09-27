@@ -245,4 +245,15 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE sign_in_attempts ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT ''`,
+  // ---------------------------------------------------------------- task imports
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source text`,
+  `CREATE TABLE IF NOT EXISTS imports (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    source text NOT NULL,
+    ref text NOT NULL,
+    title text NOT NULL DEFAULT '',
+    task_count int NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS imports_source_ref_idx ON imports (source, ref)`,
 ]

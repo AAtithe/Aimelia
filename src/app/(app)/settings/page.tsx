@@ -51,7 +51,8 @@ export default function SettingsPage() {
           <h2>Microsoft 365 <span className="hcount">{ms.connected ? 'Connected' : ms.configured ? 'Ready to connect' : 'Paused'}</span></h2>
           <div className="body">
             {ms.connected ? (
-              <p>Connected as <b>{ms.account}</b>. Aimelia reads mail and calendar, writes drafts and focus-time events, and never sends email.</p>
+              <p>Connected as <b>{ms.account}</b>. Aimelia reads mail, calendar and To Do, writes drafts and focus-time events, and never sends email.
+                If Import tasks says To Do access is missing, choose Connect again and accept the Tasks permission.</p>
             ) : ms.configured ? (
               <p>The Microsoft app is set up. Connect with the same email you use for Aimelia; any other account is refused.</p>
             ) : (
@@ -69,7 +70,7 @@ export default function SettingsPage() {
           </div>
           <ConfigFields fields={['ms_tenant_id', 'ms_client_id', 'ms_client_secret']} values={s.values} onSaved={saved}
             intro={<>For the developer: register the app in Microsoft Entra with the redirect address <span className="mono">{ms.redirect_uri}</span> and the delegated
-              permissions User.Read, Mail.ReadWrite, Calendars.ReadWrite and offline_access, then enter its details here.</>} />
+              permissions User.Read, Mail.ReadWrite, Calendars.ReadWrite, Tasks.Read and offline_access, then enter its details here.</>} />
         </div>
       )}
 
@@ -83,6 +84,12 @@ export default function SettingsPage() {
         <ConfigCard title="WSCIP and Payroll Command Center" intro="Optional. A read-only user in each lets the agents look things up instead of asking you. Only a fixed list of reads is ever made."
           fields={['wscip_email', 'wscip_password', 'pcc_email', 'pcc_password']} values={s.values} onSaved={saved}
           status={s.sources.wscip || s.sources.pcc ? <span className="pill Done">Connected</span> : <span className="pill Parked">Optional</span>} />
+      )}
+
+      {s && (
+        <ConfigCard title="Fireflies" intro="Optional. With your Fireflies API key (Fireflies: Settings, Developer settings), Import tasks lists your recent meetings and turns their action items into tasks. Read only."
+          fields={['fireflies_api_key']} values={s.values} onSaved={saved}
+          status={s.values.fireflies_api_key?.set ? <span className="pill Done">Connected</span> : <span className="pill Parked">Optional</span>} />
       )}
 
       <CaptureCard data={acct.data} reload={acct.load} appUrl={s?.app_url || ''} />

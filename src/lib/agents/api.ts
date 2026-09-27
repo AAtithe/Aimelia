@@ -7,12 +7,15 @@ import { body, fail } from '../http'
 import { availableProviders, DEFAULT_MODELS, resolveModel, resolveProvider } from '../llm'
 import { addDays, isYmd, londonToday } from '../dates'
 import { runLater, type Endpoint } from '../router'
-import { graph } from '../microsoft'
+import { connection, graph } from '../microsoft'
+import { env } from '../env'
 import { bookFocus, CalendarError } from './calendarBlocks'
 import { learningStats, recordLesson } from './lessons'
 import { buildBrief, channels, send } from './notify'
 import { getPipeline, logEvent, processQueue, seedDefaults, splitCapture } from './orchestrator'
 import { deferTask, firstDue, scheduleFollowUp, touch, type Cadence } from './schedule'
+import { csvItems, extractActions, fingerprint, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
+import { fileToText, ImportError, IMPORT_TYPES } from './importText'
 import { configuredSources, lookup } from './sources'
 
 // ---------------------------------------------------------------- schemas
@@ -43,6 +46,13 @@ const PipelinePatch = z.object({
   work_start: hhmm, work_end: hhmm, focus_minutes: z.number().int().min(15).max(480), use_ws_systems: z.boolean(),
 }).partial()
 const Capture = z.object({ text: z.string().trim().min(1).max(20000), run_now: z.boolean().default(true) })
+const ImportText = z.object({ text: z.string().trim().min(1).max(200_000), kind: z.enum(['document', 'meeting', 'list']).default('meeting'),
+  title: z.string().trim().max(300).default(''), run_now: z.boolean().default(true), force: z.boolean().default(false) })
+// Vercel takes request bodies up to 4.5 MB, so files up to about 3 MB once base64 encoded.
+const ImportFile = z.object({ filename: z.string().trim().min(1).max(300), data: z.string().min(1).max(4_200_000, 'that file is too big: keep it under 3 MB'),
+  kind: z.enum(['document', 'meeting', 'list']).optional(), run_now: z.boolean().default(true), force: z.boolean().default(false) })
+const ImportTodo = z.object({ list_ids: z.array(z.string().min(1)).min(1), run_now: z.boolean().default(true) })
+const ImportAgain = z.object({ run_now: z.boolean().default(true), force: z.boolean().default(false) })
 const FollowUp = z.object({ outcome: z.enum(['delivered', 'chase', 'snooze']), days: z.number().int().min(1).max(90).default(7) })
 const Defer = z.object({ until: ymd, reason: z.string().default('') })
 const Book = z.object({ minutes: z.number().int().min(15).max(480).optional() })
@@ -64,6 +74,7 @@ export function taskOut(t: Row) {
     review_flag: t.review_flag, run_count: t.run_count, last_run_at: iso(t.last_run_at), created_at: iso(t.created_at), updated_at: iso(t.updated_at),
     open_questions: t.open_questions ?? 0, ready_actions: t.ready_actions ?? 0, kind: t.kind, parent_id: t.parent_id, routine_id: t.routine_id,
     scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
+    source: t.source ?? null,
   }
 }
 const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status, created_at: iso(x.created_at) })
@@ -111,6 +122,24 @@ async function requeue(id: string, reason: string, run = true) {
   await touch(id)
   await logEvent(id, 'status', 'tom', { status: 'queued', reason })
   if (run) kickQueue()
+}
+
+/** Read a pasted or uploaded import into tasks: a list is taken line by line (or row by row), anything else is read by the AI. */
+async function importItems(text: string, kind: 'document' | 'meeting' | 'list', title: string, csv = false) {
+  if (!text.trim()) fail(422, 'There is no text in that to read.')
+  const items = csv ? csvItems(text) : kind === 'list' ? listItems(text) : await extractActions(text, kind, title)
+  if (!items.length) fail(422, kind === 'list' ? 'No tasks found in that list.' : 'No actions found. If it is a plain list of tasks, import it as a list instead.')
+  return items
+}
+
+/** What an import endpoint answers: the new tasks, or 409 saying when it was imported before. */
+function importReply(saved: Saved, runNow: boolean) {
+  if (saved.duplicate) {
+    return Response.json({ detail: `Already imported${saved.imported_at ? ` on ${saved.imported_at.slice(0, 10)}` : ''} as ${saved.task_count} task${saved.task_count === 1 ? '' : 's'}. Import it again only if you mean to.`,
+      duplicate: true, imported_at: saved.imported_at, task_count: saved.task_count }, { status: 409 })
+  }
+  if (runNow) kickQueue(20)
+  return Response.json(saved.tasks.map(taskOut), { status: 201 })
 }
 
 async function closeIfSettled(taskId: string) {
@@ -192,6 +221,47 @@ export const todoEndpoints: Endpoint[] = [
     if (b.run_now) kickQueue(20)
     return Response.json(made.map((t) => taskOut(t!)), { status: 201 })
   }],
+
+  // ---------------------------------------------------------------- imports: documents, meeting notes, Fireflies, Microsoft To Do
+  ['GET', '/import', async () => {
+    const ms = await connection().catch(() => ({ configured: false, connected: false }))
+    return { file_types: IMPORT_TYPES, microsoft_todo: { configured: ms.configured, connected: ms.connected }, fireflies: !!env.firefliesKey(), ...(await importHistory()) }
+  }],
+  ['POST', '/import/text', async (req) => {
+    const b = await body(req, ImportText)
+    await seedDefaults()
+    const items = await importItems(b.text, b.kind, b.title)
+    return importReply(await saveImport({ source: b.kind, ref: fingerprint(b.text), title: b.title || (b.kind === 'list' ? 'Pasted list' : 'Pasted notes'), items, force: b.force }), b.run_now)
+  }],
+  ['POST', '/import/file', async (req) => {
+    const b = await body(req, ImportFile)
+    await seedDefaults()
+    let text: string
+    try { text = fileToText(b.filename, Buffer.from(b.data, 'base64')) } catch (e) {
+      if (e instanceof ImportError) fail(415, e.message)
+      fail(422, 'That file could not be read. If it is a Word document, open it and save it again as .docx.')
+    }
+    const csv = /\.csv$/i.test(b.filename)
+    const kind = b.kind ?? (csv ? 'list' : /\.(vtt|srt)$/i.test(b.filename) ? 'meeting' : 'document')
+    const title = b.filename.replace(/\.[a-z0-9]+$/i, '')
+    const items = await importItems(text!, kind, title, csv)
+    return importReply(await saveImport({ source: kind, ref: fingerprint(text!), title, items, force: b.force }), b.run_now)
+  }],
+  ['GET', '/import/todo/lists', async () => ({ lists: await todoLists() })],
+  ['POST', '/import/todo', async (req) => {
+    const b = await body(req, ImportTodo)
+    await seedDefaults()
+    const r = await importTodo(b.list_ids)
+    if (b.run_now && r.tasks.length) kickQueue(20)
+    return Response.json({ tasks: r.tasks.map(taskOut), skipped: r.skipped, lists: r.lists }, { status: 201 })
+  }],
+  ['GET', '/import/fireflies', async () => ({ meetings: await firefliesMeetings() })],
+  ['POST', '/import/fireflies/:id', async (req, p) => {
+    const b = await body(req, ImportAgain)
+    await seedDefaults()
+    return importReply(await importFireflies(p.id, b.force), b.run_now)
+  }],
+
   ['GET', '/tasks/:id', async (_r, p) => fullTask(p.id)],
   ['PATCH', '/tasks/:id', async (req, p) => {
     const b = await body(req, TaskPatch)
