@@ -3,12 +3,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type Briefing, type Question, type Task, dueState, fmtDate } from '@/lib/client/todo'
 import { Shell, useShell } from '@/components/Shell'
-import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
+import { ActionItem, FollowUpItem, QuestionItem, StatusPill } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
 import { BackActions, type Project } from '@/components/planner/Projects'
 import { FilterBar, filterQuery, useSettled, NO_FILTERS, type Filters } from '@/components/tasks/Filters'
 import Link from 'next/link'
+
+/** What an urgent task needs next, by where it is. */
+const URGENT_NEXT: Record<string, string> = {
+  queued: 'The team starts on it first.', processing: 'The team is on it now.',
+  needs_input: 'The team needs your answer: it is at the top of Questions.', ready: 'Ready: approve it now in To approve.',
+  doing: 'Approved: do it now from To do.', due: 'Check it now in Follow-ups.', failed: 'The run failed: open it and run the team again.',
+  scheduled: 'Parked: open it and bring it back if it cannot wait.',
+}
 
 /** Whether an item passes the filter bar: every word somewhere in its text, and the priority if one is picked. */
 function passes(f: Filters, priority: number | undefined, ...text: (string | null | undefined)[]) {
@@ -117,6 +125,20 @@ export default function Today() {
       {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
+          {(brief.urgent?.length ?? 0) > 0 && (
+            <div className="card urgentcard"><h2>Urgent and vital <span className="hcount">{brief.urgent!.length}</span></h2>
+              {brief.urgent!.map((t) => (
+                <div className="item flag" key={t.id}>
+                  <div className="o"><StatusPill status={t.status} />{t.urgency?.reason && <span>{t.urgency.reason}</span>}</div>
+                  <div className="t">{t.title}</div>
+                  <div className="meta">{URGENT_NEXT[t.status] || 'Open it to see where it is.'}</div>
+                  <div className="toolbar">
+                    <button className="btn primary" onClick={() => setOpenTask(t.id)}>Open</button>
+                    <button className="btn" onClick={() => api(`/tasks/${t.id}/urgent`, { method: 'POST', body: { urgent: false } }).then(load).catch((e) => setMsg({ ok: false, text: e.message }))}>Not urgent</button>
+                  </div>
+                </div>
+              ))}</div>
+          )}
           {(brief.planned_today?.length ?? 0) > 0 && (
             <div className="card"><h2>Planned for today <span className="hcount"><Link href="/planner">Planner</Link></span></h2>
               <TaskTable tasks={brief.planned_today!} onOpen={setOpenTask} /></div>

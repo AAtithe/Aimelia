@@ -120,7 +120,7 @@ export async function nudgeStale(staleDays: number, now: Date = new Date()): Pro
   const cutoff = new Date(now.getTime() - staleDays * 86400000).toISOString()
   const rows = await q(
     `SELECT id, COALESCE(last_touched_at, created_at) AS last FROM tasks
-     WHERE status IN ('ready','needs_input','failed') AND COALESCE(last_touched_at, created_at) <= $1
+     WHERE status IN ('ready','needs_input','failed') AND NOT urgent AND COALESCE(last_touched_at, created_at) <= $1
        AND (stale_nudged_at IS NULL OR stale_nudged_at <= $1)`, [cutoff])
   for (const r of rows) {
     const days = Math.floor((now.getTime() - new Date(r.last).getTime()) / 86400000)

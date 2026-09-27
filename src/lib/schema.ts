@@ -254,6 +254,12 @@ export const SCHEMA: string[] = [
   `ALTER TABLE sign_in_attempts ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT ''`,
   // ---------------------------------------------------------------- task imports
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source text`,
+  // Urgent and vital: top of every list and first for the agents. urgent_by says who decided (tom, aimelia or an agent);
+  // Tom's call is never overridden by an agent.
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS urgent boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS urgent_reason text`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS urgent_by text`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS urgent_at timestamptz`,
   // Days after an approved email or call that Aimelia checks it came back; 0 switches it off. Handovers always follow up on their due date.
   `ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS follow_up_days int NOT NULL DEFAULT 7`,
   // When Tom approved an action (it waits in To do) and when he marked it done.

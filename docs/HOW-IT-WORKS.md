@@ -36,6 +36,24 @@ action on it is done. Marking an email, call or handover done schedules its chec
 date), unless Tom marks it done with no check needed. Approving a decision or a note settles it at once. It opens on the first section with
 something in it; the figures along the top open their section.
 
+## Most urgent first, and urgent and vital
+
+`src/lib/agents/urgency.ts`, `src/lib/agents/triage.ts`.
+
+- **One urgency score** orders every list (All tasks, each section of Today, the morning push) and decides which task
+  the agents take next. Highest first: urgent and vital; then past due (more the longer it is late); due today; due in
+  the next two days, then the next week; then priority; then waiting on Tom (his answer or approval frees the team);
+  and a little for age, so nothing sinks for ever. Each task shows the reason it sits where it does (Overdue by 3 days,
+  Due tomorrow, High priority).
+- **Urgent and vital** is the fast lane: real harm within a day or two if it is not dealt with (a legal, HMRC or
+  regulatory deadline, payroll or a payment at risk, cash, a key client at risk, a staff or safety matter). It is set
+  by Tom (the task drawer, the one-task form, or typing urgent, asap or !! in the bar), by the AI that tidies what he
+  adds, or by an agent working the task, always with the reason. Tom's call is final: an agent never marks a task he
+  has cleared, and only Tom clears one.
+- An urgent task is first for the agents, sits in its own card at the top of Today saying what it needs next, is
+  marked in every table, leads the morning push, and is sent to Teams or the phone straight away when those are set
+  up. It is never sent back through Triage for going stale.
+
 ## Adding tasks
 
 The type bar at the bottom of Today and All tasks (and the iPhone shortcut, through `/api/todo/capture`) saves what is

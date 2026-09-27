@@ -633,3 +633,66 @@ describe('searching and filtering tasks', () => {
     expect(a.id).toBeTruthy()
   })
 })
+
+describe('urgency: most urgent first, and urgent and vital', () => {
+  it('scores overdue, due soon, priority and urgent in that order, and says why', async () => {
+    const { urgencyOf } = await import('@/lib/agents/urgency')
+    const today = '2026-09-27'
+    const now = Date.parse('2026-09-27T12:00:00Z')
+    const base = { priority: 2, status: 'queued', created_at: '2026-09-27T09:00:00Z' }
+    const s = (x: any) => urgencyOf({ ...base, ...x }, today, now)
+    expect(s({ due_date: '2026-09-24' }).reason).toBe('Overdue by 3 days')
+    expect(s({ due_date: '2026-09-27' }).reason).toBe('Due today')
+    expect(s({ due_date: '2026-09-28' }).reason).toBe('Due tomorrow')
+    expect(s({ priority: 1 }).reason).toBe('High priority')
+    expect(s({ urgent: true, urgent_reason: 'HMRC deadline' }).reason).toBe('Urgent and vital: HMRC deadline')
+    const order = [s({ urgent: true }), s({ due_date: '2026-09-24' }), s({ due_date: '2026-09-27' }), s({ due_date: '2026-09-29' }), s({ priority: 1 }), s({}), s({ priority: 3 })]
+    expect(order.map((o) => o.score)).toEqual([...order.map((o) => o.score)].sort((a, b) => b - a))
+  })
+
+  it('lists and runs the most urgent first; the sort matches the score', async () => {
+    const today = londonToday()
+    await create({ title: 'Low, no date', priority: 3 })
+    await create({ title: 'High priority', priority: 1 })
+    await create({ title: 'Overdue', due_date: addDays(today, -3) })
+    const u = await create({ title: 'Payroll will not run', urgent: true, urgent_reason: 'staff unpaid Friday' })
+    await create({ title: 'Due tomorrow', due_date: addDays(today, 1) })
+    const list = (await req('GET', '/tasks')).data
+    expect(list.map((t: any) => t.title)).toEqual(['Payroll will not run', 'Overdue', 'Due tomorrow', 'High priority', 'Low, no date'])
+    expect(list[0]).toMatchObject({ urgent: true, urgent_reason: 'staff unpaid Friday', urgent_by: 'tom' })
+    expect(list.map((t: any) => t.urgency.score)).toEqual([...list.map((t: any) => t.urgency.score)].sort((a: number, b: number) => b - a))
+    expect((await req('GET', '/tasks?urgent=1')).data.map((t: any) => t.id)).toEqual([u.id])
+    expect((await req('GET', '/briefing')).data.urgent.map((t: any) => t.id)).toEqual([u.id])
+    const { claimNext } = await import('@/lib/agents/orchestrator')
+    expect(await claimNext()).toBe(u.id)
+  })
+
+  it('"urgent" or "asap" in the bar marks it; an agent can mark it; only Tom clears it, and his call stands', async () => {
+    const r = await req('POST', '/capture', { text: 'ASAP chase the Corrigans VAT payment\nbook a haircut', run_now: false })
+    const [a, b] = r.data
+    expect([a.urgent, b.urgent]).toEqual([true, false])
+
+    use(new Scripted({ worker: [{ summary: 'v', actions: [action()], urgent: { vital: true, reason: 'Penalty if the return is late' } }], reviewer: [approve()] }))
+    await q(`UPDATE tasks SET status = 'done' WHERE id = $1`, [a.id])
+    await processQueue()
+    const got = await get(b.id)
+    expect([got.urgent, got.urgent_reason, got.urgent_by]).toEqual([true, 'Penalty if the return is late', 'Triage'])
+
+    // Tom clears it: the agents cannot put it back.
+    await req('POST', `/tasks/${b.id}/urgent`, { urgent: false })
+    await req('POST', `/tasks/${b.id}/run`)
+    await processQueue()
+    const again = await get(b.id)
+    expect([again.urgent, again.urgent_by]).toEqual([false, 'tom'])
+    expect(again.events.some((e: any) => String(e.content?.reason || '').startsWith('marked urgent and vital'))).toBe(true)
+    expect(again.events.some((e: any) => e.content?.reason === 'no longer urgent')).toBe(true)
+  })
+})
+
+describe('the urgent marker in the bar', () => {
+  it('is taken off the title', async () => {
+    const { captureLines } = await import('@/lib/agents/orchestrator')
+    expect(captureLines('URGENT: chase Corrigans VAT\n- pay HMRC asap\nbook haircut !!\nurgently needed: nothing').map((x) => [x.title, x.urgent])).toEqual([
+      ['chase Corrigans VAT', true], ['pay HMRC', true], ['book haircut', true], ['urgently needed: nothing', true]])
+  })
+})

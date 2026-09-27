@@ -22,11 +22,11 @@ export function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: strin
               t.kind === 'follow_up' && `checking ${t.follow_up_owner || 'the owner'} delivered`,
               t.kind === 'routine' && 'from a routine'].filter(Boolean).join(', ')
             return (
-              <tr key={t.id} className="click" onClick={() => onOpen(t.id)} tabIndex={0}
+              <tr key={t.id} className={`click ${t.urgent && t.status !== 'done' ? 'urgentrow' : ''}`} onClick={() => onOpen(t.id)} tabIndex={0}
                 onKeyDown={(e) => e.key === 'Enter' && onOpen(t.id)}>
                 <td>
-                  <div className="t">{t.title}</div>
-                  <div className="d">{waiting || t.summary || t.notes || 'No brief yet'}</div>
+                  <div className="t">{t.urgent && t.status !== 'done' && <span className="pill Overdue urgent-pill">Urgent</span>}{t.title}</div>
+                  <div className="d">{[t.status !== 'done' && t.urgency?.reason, waiting].filter(Boolean).join('. ') || t.summary || t.notes || 'No brief yet'}</div>
                 </td>
                 <td className="nowrap"><StatusPill status={t.status} /></td>
                 <td className="nowrap hide-sm">{PRIORITY_LABEL[t.priority]}</td>
@@ -55,6 +55,8 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
   const [title, setTitle] = useState('')
   const [priority, setPriority] = useState(2)
   const [due, setDue] = useState('')
+  const [urgent, setUrgent] = useState(false)
+  const [urgentWhy, setUrgentWhy] = useState('')
   const [docs, setDocs] = useState<File[]>([])
   const [docsKey, setDocsKey] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -85,12 +87,12 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
     try {
       if (one) {
         // With documents, the task waits for them to be read before the team starts.
-        const t = await api<Task>('/tasks', { method: 'POST', body: { title, notes: text, priority, due_date: due || null, run_now: !docs.length } })
+        const t = await api<Task>('/tasks', { method: 'POST', body: { title, notes: text, priority, due_date: due || null, run_now: !docs.length, urgent, urgent_reason: urgentWhy } })
         if (docs.length) {
           try { await attachToTask(t.id, docs) } catch (e: any) { setMsg({ ok: false, text: `The task was added, but the documents were not: ${e.message} Attach them from the task.` }); onAdded(); return }
         }
         setMsg({ ok: true, text: docs.length ? `Added with ${docs.length} document${docs.length === 1 ? '' : 's'}. Claude reads and assesses them, then the team works them through.` : 'Added. The team is on it.' })
-        setTitle(''); setText(''); setDue(''); setPriority(2); setDocs([]); setDocsKey((k) => k + 1)
+        setTitle(''); setText(''); setDue(''); setPriority(2); setUrgent(false); setUrgentWhy(''); setDocs([]); setDocsKey((k) => k + 1)
       } else {
         // Clear the box at once so the bar is ready for the next thing; put the text back if the send fails.
         const sent = text
@@ -151,6 +153,9 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
                     <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
                   </label>
                 </div>
+                <label className="chk"><input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />Urgent and vital: first for the team, top of every list</label>
+                {urgent && <label className="fld"><span>Why (a few words)</span>
+                  <input value={urgentWhy} onChange={(e) => setUrgentWhy(e.target.value)} placeholder="HMRC deadline Friday, penalty if missed" /></label>}
                 <label className="fld"><span>Documents to read and assess (optional): policies, procedures, letters, photos of paperwork</span>
                   <input key={docsKey} type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.vtt,.srt,.png,.jpg,.jpeg,.gif,.webp"
                     onChange={(e) => setDocs(Array.from(e.target.files || []))} />

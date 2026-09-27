@@ -7,14 +7,16 @@ import { env } from '../env'
 import { q } from '../db'
 import { londonParts, londonToday } from '../dates'
 import type { Pipeline } from './orchestrator'
+import { urgencySql } from './urgency'
 
 export const channels = () => ({ teams: !!env.teamsWebhook(), phone: !!env.ntfyUrl() })
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 export async function buildBrief() {
+  const urgent = await q(`SELECT title, urgent_reason FROM tasks WHERE urgent AND status <> 'done' ORDER BY urgent_at`)
   const questions = await q(`SELECT qn.question, t.title FROM questions qn JOIN tasks t ON t.id = qn.task_id
-                             WHERE qn.status = 'open' AND t.status = 'needs_input' ORDER BY t.priority, qn.created_at`)
+                             WHERE qn.status = 'open' AND t.status = 'needs_input' ORDER BY ${urgencySql()} DESC, qn.created_at`)
   const actions = await q(`SELECT a.title FROM actions a JOIN tasks t ON t.id = a.task_id
                            WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, a.position`)
   const followUps = await q(`SELECT title FROM tasks WHERE status = 'due' ORDER BY due_date`)
@@ -23,6 +25,7 @@ export async function buildBrief() {
   const planned = await q(`SELECT title FROM tasks WHERE planned_for = $1 AND status <> 'done' ORDER BY priority, created_at`, [londonToday()])
   const back = await q(`SELECT title, kind FROM projects WHERE status IN ('active', 'someday') AND review_on <= $1 ORDER BY review_on`, [londonToday()])
   const parts: string[] = []
+  if (urgent.length) parts.push(`${urgent.length} urgent and vital`)
   if (questions.length) parts.push(`${plural(questions.length, 'question')} to answer`)
   if (actions.length) parts.push(`${actions.length} ready to approve`)
   if (toDo.length) parts.push(`${toDo.length} approved to do`)
@@ -31,6 +34,7 @@ export async function buildBrief() {
   if (planned.length) parts.push(`${plural(planned.length, 'task')} planned for today`)
   if (back.length) parts.push(`${back.length} back on your desk`)
   const lines = [
+    ...urgent.slice(0, 3).map((x) => `Urgent: ${x.title}${x.urgent_reason ? ` (${x.urgent_reason})` : ''}`),
     ...questions.slice(0, 3).map((x) => `Answer: ${x.question} (${x.title})`),
     ...followUps.slice(0, 3).map((x) => `Follow up: ${x.title}`),
     ...actions.slice(0, 4).map((x) => `Approve: ${x.title}`),
@@ -39,7 +43,7 @@ export async function buildBrief() {
     ...back.slice(0, 3).map((x) => `Back to look at: ${x.title}${x.kind === 'project' ? ' (project review)' : ''}`),
   ]
   return { headline: parts.length ? parts.join(', ') : 'Nothing needs you this morning', lines, empty: !parts.length,
-    counts: { questions: questions.length, actions: actions.length, to_do: toDo.length, follow_ups: followUps.length, overdue, planned: planned.length, back: back.length } }
+    counts: { urgent: urgent.length, questions: questions.length, actions: actions.length, to_do: toDo.length, follow_ups: followUps.length, overdue, planned: planned.length, back: back.length } }
 }
 
 type Brief = Awaited<ReturnType<typeof buildBrief>>
@@ -48,7 +52,7 @@ export function teamsPayload(brief: Brief) {
   const card = {
     type: 'AdaptiveCard', $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', version: '1.4',
     body: [
-      { type: 'TextBlock', text: 'Aimelia: this morning', weight: 'Bolder', size: 'Medium', color: 'Accent' },
+      { type: 'TextBlock', text: (brief as { title?: string }).title || 'Aimelia: this morning', weight: 'Bolder', size: 'Medium', color: 'Accent' },
       { type: 'TextBlock', text: brief.headline, wrap: true },
       ...brief.lines.map((line) => ({ type: 'TextBlock', text: `- ${line}`, wrap: true, spacing: 'Small' })),
     ],

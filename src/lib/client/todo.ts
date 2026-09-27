@@ -73,6 +73,10 @@ export interface Task {
   follow_up_owner: string | null
   follow_up_type?: 'delegate' | 'email' | 'call' | null
   closed_at?: string | null
+  urgent?: boolean
+  urgent_reason?: string | null
+  urgent_by?: string | null
+  urgency?: { score: number; reason: string | null }
   calendar_event: { id: string; start: string; end: string; link?: string } | null
   stale_nudged_at: string | null
   source?: string | null
@@ -191,6 +195,7 @@ export interface Briefing {
   channels: Record<string, boolean>
   sources: Record<string, boolean>
   memory_questions?: number
+  urgent?: Task[]
   due_back?: { id: string; kind: 'project' | 'item'; title: string; review_on: string; notes: string }[]
   planned_today?: Task[]
 }
