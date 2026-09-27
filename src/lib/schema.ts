@@ -256,4 +256,24 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS imports_source_ref_idx ON imports (source, ref)`,
+  // Imports the AI reads run as jobs, so a long PDF never depends on one browser request staying open.
+  `CREATE TABLE IF NOT EXISTS import_jobs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    status text NOT NULL DEFAULT 'queued',
+    kind text NOT NULL,
+    title text NOT NULL DEFAULT '',
+    ref text NOT NULL,
+    text text NOT NULL DEFAULT '',
+    pdf text,
+    force boolean NOT NULL DEFAULT false,
+    run_now boolean NOT NULL DEFAULT true,
+    attempts int NOT NULL DEFAULT 0,
+    error text,
+    task_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+    prior jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    started_at timestamptz,
+    finished_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS import_jobs_status_idx ON import_jobs (status, created_at)`,
 ]

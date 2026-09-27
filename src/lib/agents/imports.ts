@@ -9,6 +9,8 @@
  * - A list (To Do, Outlook tasks CSV, pasted lines) is already tasks: one task per item, no AI.
  * - Every import is recorded by source and reference, so the same document, meeting or To Do task
  *   is never imported twice by accident. The record is claimed before any task is written.
+ * - Anything the AI reads runs as a job: the request queues it and returns at once, the work runs after the
+ *   response, and the background timer picks up any job whose run was cut short. The screen polls the job.
  * - Everything imported goes to Triage like any other task: Do, Delegate, Defer or Drop.
  * - Microsoft To Do and Fireflies are read only. Nothing is changed or marked complete there.
  */
@@ -16,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { iso, one, q, type Row } from '../db'
 import { env } from '../env'
 import { fail, HttpError } from '../http'
+import { json } from '../db'
 import { completeJson } from '../llm'
 import { graph, GraphError } from '../microsoft'
 import { londonToday } from '../dates'
@@ -31,6 +34,10 @@ export const SOURCE_LABEL: Record<Source, string> = {
 }
 const MAX_TASKS = 60
 const MAX_TEXT = 60_000
+const READ_TIMEOUT_MS = 240_000
+/** A job still marked reading after this long was cut off (the server stops at five minutes) and is picked up again. */
+const STALE_MINUTES = 7
+const MAX_ATTEMPTS = 2
 
 const ymdOrNull = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
 const clampPriority = (v: unknown) => { const n = parseInt(String(v), 10); return Number.isFinite(n) ? Math.min(Math.max(n, 1), 3) : 2 }
@@ -46,7 +53,8 @@ export async function extractActions(text: string, kind: 'document' | 'meeting',
   let reply: any
   try {
     reply = await completeJson({
-      provider: pdf ? 'anthropic' : 'auto', role: 'import', temperature: 0.2, maxTokens: 8000, pdf,
+      // Room for Claude's reasoning as well as the list, and a time limit inside the server's five minutes.
+      provider: pdf ? 'anthropic' : 'auto', role: 'import', temperature: 0.2, maxTokens: 32000, timeoutMs: READ_TIMEOUT_MS, pdf,
       system: `${IMPORT_PROMPT}\n\nHouse rules:\n${pipeline.house_rules}\n\nTom's team:\n${pipeline.team_directory || '(not given)'}`,
       payload: { source: kind === 'meeting' ? 'meeting notes or transcript' : 'document', title, today: londonToday(),
         text: pdf ? '(The document is the attached PDF. Read every page, including tables and scanned pages.)' : clipped },
@@ -177,6 +185,87 @@ export async function importHistory(limit = 15) {
     microsoft_todo_imported: todo?.n ?? 0,
     microsoft_todo_last: iso(todo?.last ?? null),
   }
+}
+
+// ---------------------------------------------------------------- jobs, for anything the AI reads
+
+export type JobKind = 'document' | 'meeting'
+
+/** Queue a read. Refuses at once (409) when the same thing was imported before, unless forced. */
+export async function queueImport(o: { kind: JobKind; title: string; ref: string; text?: string; pdf?: string; force?: boolean; runNow?: boolean }) {
+  if (o.pdf && !env.anthropicKey()) fail(503, 'Reading PDFs needs the Claude (Anthropic) API key. Add it in Settings, or copy the text out of the PDF and paste it.')
+  if (!o.force) {
+    const prior = await one(`SELECT * FROM imports WHERE source = $1 AND ref = $2`, [o.kind, o.ref])
+    if (prior) return { duplicate: true as const, imported_at: iso(prior.created_at), task_count: prior.task_count as number, title: prior.title as string }
+  }
+  const job = (await one(`INSERT INTO import_jobs (kind, title, ref, text, pdf, force, run_now) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [o.kind, o.title.slice(0, 500), o.ref, o.text ?? '', o.pdf ?? null, !!o.force, o.runNow ?? true]))!
+  return { duplicate: false as const, id: job.id as string }
+}
+
+/** Take the next job: queued, or cut off mid-read. Jobs that have used their attempts are failed instead. */
+async function claimJob(): Promise<Row | null> {
+  for (;;) {
+    const job = await one(
+      `UPDATE import_jobs SET status = 'reading', started_at = now(), attempts = attempts + 1
+       WHERE id = (SELECT id FROM import_jobs WHERE status = 'queued'
+                     OR (status = 'reading' AND started_at < now() - ($1 || ' minutes')::interval)
+                   ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+       RETURNING *`, [String(STALE_MINUTES)])
+    if (!job) return null
+    if (job.attempts <= MAX_ATTEMPTS) return job
+    await finishJob(job.id, 'failed', { error: job.pdf
+      ? 'Claude did not finish reading this PDF after two tries. Split it into smaller parts, or paste the pages with the actions.'
+      : 'The AI did not finish reading this after two tries. Try a shorter piece.' })
+  }
+}
+
+async function finishJob(id: string, status: 'done' | 'failed' | 'duplicate', o: { error?: string; taskIds?: string[]; prior?: unknown } = {}) {
+  // The file is not kept once the job is over.
+  await q(`UPDATE import_jobs SET status = $2, error = $3, task_ids = $4::jsonb, prior = $5::jsonb, text = '', pdf = NULL, finished_at = now() WHERE id = $1`,
+    [id, status, o.error ?? null, json(o.taskIds ?? []), o.prior === undefined ? null : json(o.prior)])
+}
+
+/**
+ * Work queued reads. A new read starts only while startWithinMs has not passed, because one read can take up
+ * to READ_TIMEOUT_MS and the server stops at five minutes. Returns how many finished and whether any new
+ * tasks want running.
+ */
+export async function runImportJobs(opts: { startWithinMs?: number; limit?: number } = {}): Promise<{ finished: number; runNow: boolean }> {
+  const deadline = Date.now() + (opts.startWithinMs ?? 30_000)
+  let finished = 0
+  let runNow = false
+  while (Date.now() < deadline && finished < (opts.limit ?? 5)) {
+    const job = await claimJob()
+    if (!job) break
+    try {
+      const items = await extractActions(job.text, job.kind, job.title, job.pdf || undefined)
+      if (!items.length) {
+        await finishJob(job.id, 'failed', { error: job.pdf ? 'Claude read the PDF and found no actions in it.' : 'No actions found. If it is a plain list of tasks, import it as a list instead.' })
+      } else {
+        const saved = await saveImport({ source: job.kind, ref: job.ref, title: job.title, items, force: job.force })
+        if (saved.duplicate) await finishJob(job.id, 'duplicate', { prior: { imported_at: saved.imported_at, task_count: saved.task_count } })
+        else { await finishJob(job.id, 'done', { taskIds: saved.tasks.map((t) => t.id) }); runNow ||= job.run_now }
+      }
+    } catch (e) {
+      console.error('Import job failed', job.id, (e as Error).message)
+      await finishJob(job.id, 'failed', { error: e instanceof HttpError ? e.message : `The read failed: ${(e as Error).message}` })
+    }
+    finished++
+  }
+  return { finished, runNow }
+}
+
+export const jobState = (j: Row) => ({
+  id: j.id, status: j.status as 'queued' | 'reading' | 'done' | 'failed' | 'duplicate', kind: j.kind, title: j.title, error: j.error,
+  task_ids: (j.task_ids || []) as string[], prior: j.prior ?? null, attempts: j.attempts,
+  created_at: iso(j.created_at), started_at: iso(j.started_at), finished_at: iso(j.finished_at),
+})
+
+/** Reads started in the last day that are still going or just ended, for the screen. */
+export async function recentJobs() {
+  return (await q(`SELECT id, status, kind, title, error, task_ids, prior, attempts, created_at, started_at, finished_at FROM import_jobs
+                   WHERE created_at > now() - interval '1 day' ORDER BY created_at DESC LIMIT 10`)).map(jobState)
 }
 
 // ---------------------------------------------------------------- Microsoft To Do

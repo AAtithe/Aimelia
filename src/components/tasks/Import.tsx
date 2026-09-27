@@ -3,6 +3,8 @@
 /**
  * Bring tasks in from elsewhere: Word documents and notes, meeting notes and transcripts, Fireflies,
  * and Microsoft To Do. Everything imported goes to Triage like any other task.
+ * Reads by the AI (PDFs, documents, meeting notes) run as jobs on the server: the screen polls the job,
+ * and the work carries on if the page is closed.
  */
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
@@ -16,33 +18,82 @@ type Status = {
   recent: { source: string; label: string; title: string; task_count: number; imported_at: string }[]
   microsoft_todo_imported: number
   microsoft_todo_last: string | null
+  jobs: Job[]
 }
+type Job = { id: string; status: 'queued' | 'reading' | 'done' | 'failed' | 'duplicate'; title: string; error: string | null
+  prior: { imported_at: string | null; task_count: number } | null; created_at: string; started_at: string | null; finished_at: string | null }
+const active = (j: Job) => j.status === 'queued' || j.status === 'reading'
+const seconds = (from: string | null) => (from ? Math.max(0, Math.round((Date.now() - new Date(from).getTime()) / 1000)) : 0)
+const elapsed = (s: number) => (s < 60 ? `${s} seconds` : `${Math.floor(s / 60)} min ${s % 60} s`)
 type Kind = 'document' | 'meeting' | 'list'
 type Tab = 'file' | 'paste' | 'todo' | 'fireflies'
 
 const MAX_BYTES = 3 * 1024 * 1024
 const made = (tasks: Task[]) => `${tasks.length} task${tasks.length === 1 ? '' : 's'} added and handed to Triage: ${tasks.slice(0, 6).map((t) => t.title).join('; ')}${tasks.length > 6 ? ' ...' : ''}.`
 
-/** Send an import; on 409 (seen before) offer to import it again. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Send an import. Lists come back as tasks at once (201); anything the AI reads comes back as a job (202),
+ * which is polled here with the time so far. On 409 (seen before) offer to import it again.
+ */
 function useImport(onAdded: () => void) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<Msg>(null)
   const [again, setAgain] = useState<(() => void) | null>(null)
   const send = useCallback(async (path: string, body: Record<string, unknown>, after?: () => void) => {
     setBusy(true); setMsg(null); setAgain(null)
+    const offerAgain = () => setAgain(() => () => send(path, { ...body, force: true }, after))
     try {
-      const tasks = await api<Task[]>(path, { method: 'POST', body })
-      setMsg({ ok: true, text: made(tasks) })
+      const r = await api<Task[] | { job: Job }>(path, { method: 'POST', body })
+      if (Array.isArray(r)) { setMsg({ ok: true, text: made(r) }); after?.(); onAdded(); return }
       after?.()
+      onAdded()
+      let job = r.job
+      const started = Date.now()
+      // Poll until the job ends. If this page is left, the job carries on and its tasks still arrive.
+      while (active(job)) {
+        const s = Math.round((Date.now() - started) / 1000)
+        setMsg({ ok: true, text: `${job.status === 'queued' ? 'Queued' : 'Reading'} ${job.title}: ${elapsed(s)} so far. A long PDF can take two or three minutes. You can leave this page; the tasks will appear in All tasks when it is done.` })
+        await sleep(3000)
+        try { job = (await api<{ job: Job }>(`/import/jobs/${job.id}`)).job } catch { /* a missed poll is retried */ }
+      }
+      const final = await api<{ job: Job; tasks: Task[] }>(`/import/jobs/${job.id}`)
+      if (final.job.status === 'done') setMsg({ ok: true, text: made(final.tasks) })
+      else if (final.job.status === 'duplicate') {
+        setMsg({ ok: false, text: `Already imported${final.job.prior?.imported_at ? ` on ${fmtDate(final.job.prior.imported_at)}` : ''} as ${final.job.prior?.task_count ?? 0} tasks.` })
+        offerAgain()
+      } else setMsg({ ok: false, text: final.job.error || 'The read failed.' })
       onAdded()
     } catch (e: any) {
       setMsg({ ok: false, text: e.message })
-      if (e.status === 409) setAgain(() => () => send(path, { ...body, force: true }, after))
+      if (e.status === 409) offerAgain()
     } finally {
       setBusy(false)
     }
   }, [onAdded])
   return { busy, msg, again, send, setMsg }
+}
+
+/** Reads still going, or ended in the last day, so a closed page or a second tab still shows where they are. */
+function Jobs({ jobs }: { jobs: Job[] }) {
+  const [, tick] = useState(0)
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [])
+  if (!jobs.length) return null
+  return (
+    <div className="card">
+      <h2>Reading now and today</h2>
+      <ul className="log body">{jobs.map((j) => (
+        <li key={j.id}><span className="who">{j.title}</span>{' '}
+          {j.status === 'reading' ? `reading, ${elapsed(seconds(j.started_at))} so far`
+            : j.status === 'queued' ? 'waiting to start'
+            : j.status === 'done' ? 'done'
+            : j.status === 'duplicate' ? 'already imported before'
+            : `failed: ${j.error || 'the read did not finish'}`}
+          <span className="when">{fmtDate(j.created_at)}</span></li>
+      ))}</ul>
+    </div>
+  )
 }
 
 function Result({ msg, again }: { msg: Msg; again: (() => void) | null }) {
@@ -218,6 +269,12 @@ export function ImportTasks() {
   const [err, setErr] = useState('')
   const load = useCallback(() => { api<Status>('/import').then(setStatus).catch((e) => setErr(e.message)) }, [])
   useEffect(() => { load() }, [load])
+  const reading = !!status?.jobs.some(active)
+  useEffect(() => {
+    if (!reading) return
+    const t = setInterval(load, 5000)
+    return () => clearInterval(t)
+  }, [reading, load])
 
   const tabs: [Tab, string][] = [['todo', 'Microsoft To Do'], ['file', 'From a file'], ['paste', 'Paste notes'], ['fireflies', 'Fireflies']]
   return (
@@ -235,6 +292,7 @@ export function ImportTasks() {
             : <FirefliesImport connected={status.fireflies} onAdded={load} />}
         </div>
       </div>
+      {status && <Jobs jobs={status.jobs} />}
       {status && status.recent.length > 0 && (
         <div className="card">
           <h2>Imported so far</h2>
