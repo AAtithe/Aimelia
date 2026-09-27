@@ -1,4 +1,4 @@
-/* ws-house.css 1.0.0, sha256 b980a48864b50c46f5c402d2f1aa3f0dadd760b450ba381d98c1d3ccbb68a3b7
+/* ws-house.css 1.1.0, sha256 2e3ea18823327f353dd826102085369e676ea33540d6e813a17e50b29686653c
    Shared by every Williams, Stanley & Co. product. Do not edit this copy:
    change AAtithe/house-style and run its sync into this file. */
 /* The Williams, Stanley & Co. house style, shared by every product.
@@ -185,6 +185,8 @@ a.btn{text-decoration:none;display:inline-block}
 .drawer-bg.open{display:block}
 .drawer{position:fixed;top:0;right:0;height:100%;width:520px;max-width:94vw;background:#fff;box-shadow:none;transform:translateX(100%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s,box-shadow .22s;z-index:51;overflow-y:auto}
 .drawer.open{transform:none;visibility:visible;box-shadow:-8px 0 32px rgba(0,51,89,.18);transition:transform .22s ease,visibility 0s,box-shadow .22s}
+/* A drawer that carries a form with a row of actions needs the room. */
+.drawer.wide{width:620px}
 .drawer .dh{background:var(--navy);color:#fff;padding:18px 22px;position:sticky;top:0;z-index:2;border-bottom:2px solid var(--coral)}
 .drawer .dh .o{font-size:12px;opacity:.8}
 .drawer .dh .t{font-size:17px;font-weight:700;margin-top:3px;padding-right:28px}

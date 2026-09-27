@@ -64,7 +64,7 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
   return (
     <>
       <div className="drawer-bg open" onClick={onClose} />
-      <aside className="drawer open" role="dialog" aria-label="Task">
+      <aside className="drawer wide open" role="dialog" aria-label="Task">
         <div className="dh">
           <button className="dclose" onClick={onClose} aria-label="Close">&times;</button>
           <div className="o">
