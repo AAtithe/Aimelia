@@ -8,10 +8,13 @@
  * - pinned means Tom wrote or edited the memory. Agents may ask about a pinned memory, never change it.
  * - memory_log records every change: who (tom, capture, weekly_check), what, before and after.
  * - memoryForContext gives the agent team and Ask Aimelia the memories that bear on what they are doing.
+ * - a phone or WhatsApp number is kept only when Tom adds it himself. Aimelia's own learning drops a new memory that
+ *   carries one, and removes one from any change it makes, since memories go into every agent's instructions.
  */
 import { randomUUID } from 'node:crypto'
 import { iso, json, one, q, type Row } from '../db'
 import { runLater } from '../router'
+import { hasPhone, redactPhones } from '../guard'
 
 export const KINDS = ['fact', 'preference', 'person', 'client', 'process'] as const
 export type Kind = (typeof KINDS)[number]
@@ -74,6 +77,7 @@ export async function getMemory(id: string) {
 export async function addMemory(m: { kind: unknown; subject: string; content: string; sources?: unknown[]; pinned?: boolean }, actor: Actor, note = '') {
   const content = clip(m.content, 1000)
   if (!content) return null
+  if (actor !== 'tom' && hasPhone(content)) return null // only Tom keeps a number
   const row = (await one(`INSERT INTO memories (kind, subject, content, pinned, sources, created_by) VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING *`,
     [asKind(m.kind), clip(m.subject, 200), content, !!m.pinned || actor === 'tom', json(m.sources || []), actor === 'tom' ? 'tom' : 'aimelia']))!
   await logChange(row.id, 'added', actor, null, row, note)
@@ -89,7 +93,8 @@ export async function changeMemory(id: string, patch: { kind?: unknown; subject?
   const before = await getMemory(id)
   if (!before) return null
   if (actor !== 'tom' && before.pinned) return null
-  const content = patch.content !== undefined ? clip(patch.content, 1000) || before.content : before.content
+  const proposed = patch.content !== undefined && actor !== 'tom' ? redactPhones(patch.content) : patch.content // only Tom adds a number
+  const content = proposed !== undefined ? clip(proposed, 1000) || before.content : before.content
   const edited = content !== before.content || (patch.subject !== undefined && patch.subject !== before.subject) || (patch.kind !== undefined && asKind(patch.kind) !== before.kind)
   const pinned = patch.pinned !== undefined ? patch.pinned : actor === 'tom' && edited ? true : before.pinned
   const sources = patch.source ? [...(before.sources || []), patch.source] : before.sources || []
