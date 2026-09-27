@@ -5,6 +5,7 @@ import { dispatcher } from '@/lib/router'
 import { todoEndpoints } from '@/lib/agents/api'
 import { mailEndpoints } from '@/lib/email/api'
 import { accountEndpoints } from '@/lib/account'
+import { chatEndpoints } from '@/lib/chat/api'
 import { encrypt, seal } from '@/lib/crypto'
 import { accessToken } from '@/lib/microsoft'
 import { q } from '@/lib/db'
@@ -18,13 +19,13 @@ import * as health from '@/app/api/health/route'
 import { call, KEY } from './helpers'
 import { TEST_USER } from './setup'
 
-const groups = [['/api/todo', todoEndpoints], ['/api/mail', mailEndpoints], ['/api/account', accountEndpoints]] as const
+const groups = [['/api/todo', todoEndpoints], ['/api/mail', mailEndpoints], ['/api/account', accountEndpoints], ['/api/chat', chatEndpoints]] as const
 const account = dispatcher('/api/account', accountEndpoints) as any
 const acc = (method: string, p: string, b?: unknown, headers?: Record<string, string>) => call(account, { method, path: `/api/account${p}`, body: b, headers })
 const cookieOf = (res: { headers: Headers }) => res.headers.get('set-cookie')!.split(';')[0]
 
 describe('every endpoint needs a sign-in', () => {
-  it('refuses all todo, mail and account endpoints without one, with a wrong key, and with a made-up session', async () => {
+  it('refuses all todo, mail, account and chat endpoints without one, with a wrong key, and with a made-up session', async () => {
     let checked = 0
     for (const [prefix, endpoints] of groups) {
       const handler = dispatcher(prefix, [...endpoints]) as any

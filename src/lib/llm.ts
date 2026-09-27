@@ -152,6 +152,8 @@ function mockReply(call: ModelCall): string {
     }
     case 'import':
       return out({ tasks: actionLines(String(p.text || '')).map((title) => ({ title, notes: '', owner: null, priority: 2, due_date: null })) })
+    case 'chat':
+      return out({ reply: 'Placeholder reply: no AI key is set on the server, so I cannot read or answer yet. Add the Claude (Anthropic) key in Settings.' })
     case 'triage':
       return out({ category: 'General', urgency: 3, confidence: 0, reasoning: 'Placeholder: no AI key is set.', action_required: 'Read and decide.' })
     case 'worker':
