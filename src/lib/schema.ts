@@ -256,6 +256,22 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS imports_source_ref_idx ON imports (source, ref)`,
+  // ---------------------------------------------------------------- Ask Aimelia: the chat agent
+  `CREATE TABLE IF NOT EXISTS chats (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    title text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS chat_messages (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    role text NOT NULL,
+    content text NOT NULL,
+    steps jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  )`,
+  `CREATE INDEX IF NOT EXISTS chat_messages_chat_idx ON chat_messages (chat_id, created_at)`,
   // Imports the AI reads run as jobs, so a long PDF never depends on one browser request staying open.
   `CREATE TABLE IF NOT EXISTS import_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

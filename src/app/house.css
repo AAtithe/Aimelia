@@ -91,6 +91,35 @@
 .ws .bar{height:8px;border-radius:4px;background:var(--mid)}
 .ws .bartrack{background:var(--grey);border-radius:4px;height:8px;overflow:hidden}
 
+/* --- Ask Aimelia: the chat agent, as a page and as a drawer --- */
+.ws .chatgrid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:18px;align-items:start}
+.ws .chatlist .item{display:flex;align-items:flex-start;gap:8px;padding:10px 14px}
+.ws .chatlist .item.on{background:var(--tint);box-shadow:inset 3px 0 0 var(--coral)}
+.ws .chatpick{flex:1;min-width:0;text-align:left;font:inherit;background:none;border:0;padding:0;cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.ws .chatpick .t{font-size:13px;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws .chat-tools{margin:4px 0 0;padding-left:16px;font-size:12px;color:var(--muted)}
+.ws .chat-tools li{margin:3px 0}
+.ws .chat{display:flex;flex-direction:column;min-height:60vh}
+.ws .chat.compact{min-height:0}
+.ws .chat-log{flex:1;display:flex;flex-direction:column;gap:14px;max-height:62vh;overflow-y:auto;padding:2px 2px 8px}
+.ws .chat.compact .chat-log{max-height:calc(100vh - 290px)}
+.ws .chat-msg{max-width:88%;display:flex;flex-direction:column;gap:3px}
+.ws .chat-msg.user{align-self:flex-end;align-items:flex-end}
+.ws .chat-msg .who{font-size:11px;font-weight:600;color:var(--muted)}
+.ws .chat-msg .bubble{white-space:pre-wrap;font-size:13.5px;line-height:1.5;border-radius:10px;padding:10px 13px;border:1px solid var(--line);background:#fff;color:var(--ink)}
+.ws .chat-msg.user .bubble{background:var(--tint);border-color:var(--tint);color:var(--navy)}
+.ws .chat-msg .bubble.thinking{color:var(--muted);font-style:italic}
+.ws .chat-steps{list-style:none;margin:2px 0 0;padding:0;font-size:11.5px;color:var(--muted)}
+.ws .chat-steps li::before{content:'> ';color:var(--wsblue)}
+.ws .chat-steps li.err{color:var(--redT)}
+.ws .chat-empty{color:var(--muted);font-size:13px}
+.ws .chat-empty p{margin:0 0 12px}
+.ws .chat-starters{display:flex;flex-wrap:wrap;gap:8px}
+.ws .chat-starters .btn{text-align:left;white-space:normal}
+.ws .chat-input{display:flex;gap:8px;align-items:flex-end;margin-top:6px}
+.ws .chat-input textarea{flex:1;min-height:44px;resize:vertical}
+.ws .chatfab{position:fixed;right:22px;bottom:22px;z-index:40;box-shadow:var(--shadowUp);border-radius:22px;padding:10px 18px}
+
 @media(max-width:700px){
   .ws header .who{margin-left:0}
   .ws .agent{flex-wrap:wrap}
@@ -102,4 +131,6 @@
   .ws .sidenav{display:none;border-right:0;border-bottom:1px solid var(--line)}
   .ws .sidenav.open{display:block}
   .ws .navbtn{display:inline-block}
+  .ws .chatgrid{grid-template-columns:1fr}
+  .ws .chat-msg{max-width:100%}
 }

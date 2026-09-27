@@ -2,16 +2,18 @@
 
 /**
  * The app frame: white brand band with the coral rule, navy header, grouped sidebar.
- * Shows the sign-in screen until there is an Aimelia session.
+ * Shows the sign-in screen until there is an Aimelia session. Every page but /chat carries the Ask Aimelia button.
  */
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { api, raw, SIGNED_OUT, type Briefing } from '@/lib/client/todo'
+import { ChatLauncher } from '@/components/chat/Chat'
 
 type Nav = { href: string; label: string; count?: (b: Briefing) => number }
 const GROUPS: [string, Nav[]][] = [
   ['My work', [
+    { href: '/chat', label: 'Ask Aimelia' },
     { href: '/today', label: 'Today', count: (b) => b.questions.length + b.actions.length + b.follow_ups.length },
     { href: '/tasks', label: 'All tasks' },
     { href: '/import', label: 'Import tasks' },
@@ -133,6 +135,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
               </div>
             </nav>
             <main className="content">{children}</main>
+            {path !== '/chat' && <ChatLauncher />}
           </div>
         </ShellContext.Provider>
       )}

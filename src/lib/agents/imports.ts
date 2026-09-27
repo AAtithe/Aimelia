@@ -83,10 +83,11 @@ export async function extractActions(text: string, kind: 'document' | 'meeting',
   try {
     const raw = await complete({
       // Room for Claude's reasoning as well as the list, and a time limit inside the server's five minutes.
-      provider: pdf ? 'anthropic' : 'auto', role: 'import', temperature: 0.2, maxTokens: 32000, timeoutMs: READ_TIMEOUT_MS, pdf, json: true, partialOk: true,
+      provider: pdf ? 'anthropic' : 'auto', role: 'import', temperature: 0.2, maxTokens: 32000, timeoutMs: READ_TIMEOUT_MS, pdf, json: true,
       system: `${IMPORT_PROMPT}\n\nHouse rules:\n${pipeline.house_rules}\n\nTom's team:\n${pipeline.team_directory || '(not given)'}`,
       messages: [{ role: 'user', content: JSON.stringify(input, null, 2) }], payload: input,
     })
+    // A reply cut off at the token limit comes back as it stands, and is salvaged below.
     try {
       reply = parseJson(raw)
     } catch (e) {

@@ -525,7 +525,7 @@ export const todoEndpoints: Endpoint[] = [
   }],
 ]
 
-async function resumeIfAnswered(taskId: string, reason: string): Promise<boolean> {
+export async function resumeIfAnswered(taskId: string, reason: string): Promise<boolean> {
   const t = await getTask(taskId)
   if (t.status !== 'needs_input' || t.open_questions > 0) return false
   await requeue(taskId, reason)

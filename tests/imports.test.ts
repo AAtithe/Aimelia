@@ -226,7 +226,6 @@ describe('PDFs, read by Claude', () => {
     await read(upload())
     expect(models[0].system).toContain('never say where the task came from')
     expect(models[0].system).toContain('keep every field short')
-    expect(models[0].partialOk).toBe(true)
   })
 
   it('a streamed reply stopped at the token limit is kept in part, not thrown away', async () => {

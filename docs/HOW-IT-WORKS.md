@@ -7,6 +7,7 @@
 | Pages (house style) | `src/app/(app)/*`, frame in `src/components/Shell.tsx`; the shared house style is `src/app/ws-house.css`, a stamped copy of AAtithe/house-style (sync it, never edit it), and Aimelia's own styles are `src/app/house.css` |
 | Agent Tasks API | `/api/todo/*`, `src/lib/agents/api.ts` |
 | Email and meetings API | `/api/mail/*`, `src/lib/email/api.ts` |
+| Ask Aimelia (chat agent) API | `/api/chat/*`, `src/lib/chat/api.ts`, agent loop in `src/lib/chat/agent.ts` |
 | Sign-in | `/api/setup` (first login), `/api/session` (email and password), `/api/account` (password, devices, keys, settings), `/api/auth/*` (Microsoft 365) |
 | Background | Vercel Cron calls `/api/cron/tick` every 10 minutes (`src/lib/tick.ts`) |
 | Database | Neon Postgres; schema in `src/lib/schema.ts`, applied automatically |
@@ -19,6 +20,30 @@ blocks them. Triage decides Do, Delegate, Defer or Drop; approving a handover sc
 the task, approving Drop closes it. Routines create recurring work ahead of time; tasks untouched for 14 days go back
 through Triage; Tom's edits and send-backs become lessons every agent sees. Facts can come from WSCIP and Payroll Command
 Center through a fixed list of read-only lookups.
+
+## Ask Aimelia: the chat agent
+
+A chatbot Tom can talk to about his work, as a page (`/chat`, first in My work) and as a drawer opened by the Ask Aimelia
+button on every other page. It is an agent, not just a chat: each turn the model sees the conversation and a fixed list
+of tools, and answers with JSON, either tool calls or the reply. Tools run on the server, their results go back to the
+model, and it repeats up to six times (four calls a step) before it must answer. The protocol is plain JSON rather than a
+provider's native tool use, so it behaves the same on Claude, OpenAI and the mock. The house rules from the agent team
+apply to it too.
+
+| Tool | What it does |
+|---|---|
+| briefing | What is waiting on Tom: counts, open questions, drafts to approve, follow-ups due |
+| search_tasks, get_task | Find tasks by words or status; read one with its draft actions and questions |
+| create_task | Adds a task for the agent team (source `chat`), as Add task does. Only when Tom asks |
+| answer_question | Answers an open agent question; the task goes back to the team once none are left, as the button does |
+| search_knowledge | The knowledge base, full-text |
+| recent_emails | Sorted email from triage, as stored |
+| upcoming_meetings | The calendar, read only. Offered only while Microsoft 365 is connected |
+| ws_lookup | The same read-only WSCIP and Payroll Command Center catalogue the agents use. Offered only when one is connected |
+
+It cannot send email or change the calendar; asked to, it offers to add a task so the team drafts it for approval. Each
+reply lists the steps it took. Conversations are kept (`chats`, `chat_messages`), the last 20 messages go to the model,
+Tom's message is saved before the model is called so a failure loses nothing, and conversations can be deleted.
 
 ## Importing tasks
 

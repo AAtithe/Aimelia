@@ -188,6 +188,8 @@ export const api = <T = any>(path: string, options: { method?: string; body?: un
 /** Email, calendar and briefing API. */
 export const mail = <T = any>(path: string, options: { method?: string; body?: unknown } = {}) => request<T>(`/api/mail${path}`, options)
 /** Anything else under /api. */
+export const chat = <T = any>(path: string, options: { method?: string; body?: unknown } = {}) => request<T>(`/api/chat${path}`, options)
+
 export const raw = <T = any>(path: string, options: { method?: string; body?: unknown } = {}) => request<T>(`/api${path}`, options)
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
