@@ -22,6 +22,8 @@ import { keepNote } from '../memory/store'
 import { attachFiles, FILE_COLS, fileOut, readTaskFiles } from './documents'
 import { answerQuestion, BLOCKING, dismissQuestion } from './questions'
 import { memoryEndpoints } from '../memory/api'
+import { plannerEndpoints } from '../planner/api'
+import { dueBack } from '../planner/projects'
 
 // ---------------------------------------------------------------- schemas
 
@@ -33,7 +35,8 @@ const cadence = z.enum(['weekly', 'fortnightly', 'monthly', 'quarterly'])
 const TaskIn = z.object({ title: z.string().trim().min(1).max(500), notes: z.string().default(''), priority: z.number().int().min(1).max(3).default(2),
   due_date: ymd.nullable().optional(), run_now: z.boolean().default(true) })
 const TaskPatch = z.object({ title: z.string().trim().min(1).max(500).optional(), notes: z.string().optional(), priority: z.number().int().min(1).max(3).optional(),
-  due_date: ymd.nullable().optional(), status: z.enum(['done', 'queued']).optional() })
+  due_date: ymd.nullable().optional(), status: z.enum(['done', 'queued']).optional(),
+  planned_for: ymd.nullable().optional(), estimate_minutes: z.number().int().min(5).max(2400).nullable().optional(), project_id: z.string().uuid().nullable().optional() })
 const Text = z.object({ text: z.string().trim().min(1) })
 const Answer = z.object({ answer: z.string().trim().min(1) })
 const ActionPatch = z.object({ title: z.string().optional(), content: z.string().optional(), details: z.record(z.string(), z.any()).optional() })
@@ -62,7 +65,7 @@ const Attach = z.object({ files: z.array(z.object({ name: z.string().trim().min(
   purpose: z.string().trim().max(1000).default(''), keep_in_knowledge: z.boolean().default(false), run_now: z.boolean().default(true) })
 const FollowUp = z.object({ outcome: z.enum(['delivered', 'chase', 'snooze']), days: z.number().int().min(1).max(90).default(7) })
 const Defer = z.object({ until: ymd, reason: z.string().default('') })
-const Book = z.object({ minutes: z.number().int().min(15).max(480).optional() })
+const Book = z.object({ minutes: z.number().int().min(15).max(480).optional(), on: ymd.optional() })
 const RoutineIn = z.object({ title: z.string().trim().min(1).max(500), notes: z.string().default(''), priority: z.number().int().min(1).max(3).default(2),
   cadence: cadence.default('weekly'), weekday: z.number().int().min(0).max(6).default(0), day_of_month: z.number().int().min(-1).max(28).refine((v) => v !== 0, 'use 1-28 or -1').default(1),
   lead_days: z.number().int().min(0).max(30).default(3), enabled: z.boolean().default(true), next_due: ymd.nullable().optional() })
@@ -81,7 +84,7 @@ export function taskOut(t: Row) {
     review_flag: t.review_flag, run_count: t.run_count, last_run_at: iso(t.last_run_at), created_at: iso(t.created_at), updated_at: iso(t.updated_at),
     open_questions: t.open_questions ?? 0, ready_actions: t.ready_actions ?? 0, kind: t.kind, parent_id: t.parent_id, routine_id: t.routine_id,
     scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
-    source: t.source ?? null,
+    source: t.source ?? null, planned_for: t.planned_for ?? null, estimate_minutes: t.estimate_minutes ?? null, project_id: t.project_id ?? null,
   }
 }
 const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status,
@@ -219,6 +222,8 @@ export const todoEndpoints: Endpoint[] = [
       q(`SELECT status, count(*)::int AS n FROM tasks GROUP BY status`),
     ])
     const memoryQuestions = (await one(`SELECT count(*)::int AS n FROM memory_questions WHERE status = 'open'`))?.n ?? 0
+    const back = await dueBack()
+    const plannedToday = await q(`${TASK_SELECT} WHERE t.planned_for = $1 AND t.status <> 'done' ORDER BY t.priority`, [londonToday()])
     const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
     for (const r of counts) c[r.status] = r.n
     return {
@@ -227,6 +232,7 @@ export const todoEndpoints: Endpoint[] = [
       actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_review_flag: a.task_review_flag })),
       failed: failed.map(taskOut), follow_ups: followUps.map((t) => ({ ...taskOut(t), handover: t.follow_up?.handover ?? null })),
       providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
+      due_back: back.map((p) => ({ id: p.id, kind: p.kind, title: p.title, review_on: p.review_on, notes: p.notes })), planned_today: plannedToday.map(taskOut),
     }
   }],
 
@@ -354,6 +360,7 @@ export const todoEndpoints: Endpoint[] = [
   ['PATCH', '/tasks/:id', async (req, p) => {
     const b = await body(req, TaskPatch)
     await getTask(p.id)
+    if (b.project_id && !(await one(`SELECT id FROM projects WHERE id = $1 AND kind = 'project'`, [b.project_id]))) fail(404, 'Project not found.')
     const sets: string[] = []
     const vals: unknown[] = [p.id]
     for (const [k, v] of Object.entries(b)) { vals.push(v ?? null); sets.push(`${k} = $${vals.length}`) }
@@ -405,7 +412,8 @@ export const todoEndpoints: Endpoint[] = [
     const pl = await getPipeline()
     let event
     try {
-      event = await bookFocus({ title: t.title, summary: t.summary || t.notes || '', minutes: b.minutes || pl.focus_minutes, workStart: pl.work_start, workEnd: pl.work_end })
+      event = await bookFocus({ title: t.title, summary: t.summary || t.notes || '', minutes: b.minutes || t.estimate_minutes || pl.focus_minutes,
+        workStart: pl.work_start, workEnd: pl.work_end, on: b.on })
     } catch (e) {
       if (e instanceof CalendarError) fail(409, e.message)
       throw e
@@ -580,6 +588,7 @@ export const todoEndpoints: Endpoint[] = [
     return out
   }],
   ...memoryEndpoints,
+  ...plannerEndpoints,
 ]
 
 /** After Tom settles a question: every task it held counts as touched, and those with nothing left open go back to the team. */

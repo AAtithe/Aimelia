@@ -38,7 +38,8 @@ export function findSlot(busy: Interval[], startFrom: string, minutes: number, w
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
-export async function bookFocus(o: { title: string; summary: string; minutes: number; workStart: string; workEnd: string; now?: Date }) {
+/** on: book on that day only (the day it is planned for), from its start or from now if that is later. */
+export async function bookFocus(o: { title: string; summary: string; minutes: number; workStart: string; workEnd: string; now?: Date; on?: string }) {
   const now = o.now ?? new Date()
   const tz = env.timezone()
   const { date, time } = londonParts(now)
@@ -50,7 +51,9 @@ export async function bookFocus(o: { title: string; summary: string; minutes: nu
   })
   const busy = (view.value || []).filter((e) => !e.isCancelled && !['free', 'workingElsewhere'].includes(e.showAs))
     .map((e) => [String(e.start.dateTime).slice(0, 16), String(e.end.dateTime).slice(0, 16)] as Interval)
-  const slot = findSlot(busy, `${date}T${time}`, o.minutes, o.workStart || '09:00', o.workEnd || '17:30')
+  const from = o.on && o.on > date ? `${o.on}T00:00` : `${date}T${time}`
+  const slot = findSlot(busy, from, o.minutes, o.workStart || '09:00', o.workEnd || '17:30')
+  if (o.on && (!slot || slot[0].slice(0, 10) !== o.on)) throw new CalendarError(`No free ${o.minutes}-minute slot in working hours on ${o.on}. Pick another day or a shorter block.`)
   if (!slot) throw new CalendarError(`No free ${o.minutes}-minute slot in working hours over the next two weeks.`)
   const event = await graph('POST', '/me/events', {
     headers, body: {

@@ -39,6 +39,7 @@ import { getPipeline, logEvent, processQueue, seedDefaults } from '../agents/orc
 import { touch } from '../agents/schedule'
 import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources'
 import { addMemory, changeMemory, getMemory, keepNote, memoryForContext, moveChatMemory, rememberedFor } from '../memory/store'
+import { saveForLater } from '../planner/projects'
 import { calculate } from './calc'
 import { findPhones, hasPhone, recipientProblem, TURN_LIMITS, turnLimiter } from '../guard'
 
@@ -148,6 +149,17 @@ export const TOOLS: Record<string, Tool> = {
     about: 'What Aimelia knows from what Tom has told it before: facts about clients, people and the firm, and how Tom likes things done. Check it before answering about any of those',
     args: '{"query": "words to search for"}',
     run: async (a) => memoryForContext(String(a.query || ''), 12),
+  },
+  save_for_later: {
+    about: 'Keep something Tom wants to come back to (an idea, an opportunity, an article, a client to call one day), or start a project, on Projects and ideas. It comes back to him on the date: Today and the morning push. Only when Tom asks',
+    args: '{"title": "short", "notes": "the detail, in his words", "link": "a web address if any", "review_on": "YYYY-MM-DD (a month from today if not given)", "kind": "item|project"}',
+    run: async (a) => {
+      const title = String(a.title || '').trim()
+      if (!title) return 'Not kept: it needs a title.'
+      const review = typeof a.review_on === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.review_on) ? a.review_on : null
+      const r = await saveForLater({ title, notes: String(a.notes || ''), link: String(a.link || ''), review_on: review, kind: a.kind === 'project' ? 'project' : 'item' })
+      return { kept: true, kind: r.kind, title: r.title, comes_back_on: r.review_on }
+    },
   },
   search_knowledge: {
     about: 'Search the knowledge base: sorted emails, meeting briefs, and documents and policies Tom has added',
@@ -391,7 +403,7 @@ How to work:
 - Use the tools for any fact about Tom's tasks, email, diary, knowledge base or clients. Never guess or invent one.
 - Put every sum through calculate and quote its results; never do arithmetic in your head.
 ${has('web_search') ? '- For outside facts that change (HMRC rates and thresholds, deadlines, legislation, news), use web_search and name the source.\n' : ''}- If a tool says something is unavailable or not connected, say so plainly rather than working around it.
-- Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
+- Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget, save_for_later${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
   run only when Tom asks for that outcome. Then do it without asking again, and confirm exactly what you did.
 - When Tom tells you something lasting about himself, the firm, clients or how he wants things done, offer to remember it, or remember it if he says so.
 - Before answering about a client, a person, a date or how Tom likes something done, check search_memory as well as what you remember below.

@@ -6,6 +6,8 @@ import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+import { BackActions, type Project } from '@/components/planner/Projects'
+import Link from 'next/link'
 
 /** Questions on the same task sit together, in the order the briefing gives them. */
 function byTask(questions: Question[]) {
@@ -84,6 +86,21 @@ export default function Today() {
           {brief.actions.length > 0 && (
             <div className="card"><h2>Ready for your approval <span className="hcount">{brief.actions.length}</span></h2>
               {brief.actions.map((a) => <ActionItem key={a.id} a={a} onDone={load} />)}</div>
+          )}
+          {(brief.planned_today?.length ?? 0) > 0 && (
+            <div className="card"><h2>Planned for today <span className="hcount"><Link href="/planner">Planner</Link></span></h2>
+              <TaskTable tasks={brief.planned_today!} onOpen={setOpenTask} /></div>
+          )}
+          {(brief.due_back?.length ?? 0) > 0 && (
+            <div className="card"><h2>Back on your desk <span className="hcount">{brief.due_back!.length}</span></h2>
+              {brief.due_back!.map((p) => (
+                <div className="item" key={p.id}>
+                  <div className="o"><span className="tag">{p.kind === 'project' ? 'Project review' : 'You wanted to come back to this'}</span></div>
+                  <div className="t"><Link href="/projects">{p.title}</Link></div>
+                  {p.notes && <div className="d">{p.notes.length > 240 ? `${p.notes.slice(0, 240)} ...` : p.notes}</div>}
+                  <BackActions p={p as unknown as Project} onDone={load} />
+                </div>
+              ))}</div>
           )}
           {brief.failed.length > 0 && (
             <div className="card"><h2>Runs that failed <span className="hcount">{brief.failed.length}</span></h2>

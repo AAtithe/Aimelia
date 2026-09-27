@@ -410,4 +410,34 @@ export const SCHEMA: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS task_files_task_idx ON task_files (task_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS task_files_status_idx ON task_files (status, created_at)`,
+  // ---------------------------------------------------------------- planner, projects and items to come back to
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS planned_for text`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimate_minutes int`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id uuid`,
+  `CREATE INDEX IF NOT EXISTS tasks_planned_idx ON tasks (planned_for)`,
+  `CREATE INDEX IF NOT EXISTS tasks_project_idx ON tasks (project_id)`,
+  // kind 'project' holds tasks; kind 'item' is something to come back to. Both come back on review_on.
+  `CREATE TABLE IF NOT EXISTS projects (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind text NOT NULL DEFAULT 'project',
+    title text NOT NULL,
+    notes text NOT NULL DEFAULT '',
+    outcome text NOT NULL DEFAULT '',
+    next_step text NOT NULL DEFAULT '',
+    link text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'active',
+    review_on text,
+    reviewed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS projects_review_idx ON projects (status, review_on)`,
+  `CREATE TABLE IF NOT EXISTS plans (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    week text NOT NULL,
+    status text NOT NULL DEFAULT 'proposed',
+    proposal jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    applied_at timestamptz
+  )`,
 ]
