@@ -180,12 +180,22 @@ export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: 
   )
 }
 
+const FOLLOW_UP_WORDS = {
+  delegate: { tag: (o: string) => `Handed to ${o}`, ask: 'Has it come back, and is it right?', done: 'Delivered, close it', closed: 'Closed. The original task is closed too.',
+    chase: 'Not yet, draft a chaser', show: 'the handover that was sent' },
+  email: { tag: (o: string) => `Emailed ${o}`, ask: 'Have they replied, and is it settled?', done: 'Settled, close it', closed: 'Closed. The original task is closed too.',
+    chase: 'No reply, draft a chaser', show: 'the email you approved' },
+  call: { tag: (o: string) => `Call with ${o}`, ask: 'Did the call happen, and is everything from it on the list?', done: 'Done, close it', closed: 'Closed. The original task is closed too.',
+    chase: 'Not yet, draft a nudge', show: 'the call you approved' },
+}
+
 export function FollowUpItem({ t, onDone }: { t: Task; onDone: () => void }) {
+  const w = FOLLOW_UP_WORDS[t.follow_up_type || 'delegate'] || FOLLOW_UP_WORDS.delegate
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<Msg>(null)
   const [show, setShow] = useState(false)
 
-  const go = async (outcome: 'delivered' | 'chase' | 'snooze', ok: string) => {
+  const go = async (outcome: 'delivered' | 'chase' | 'snooze' | 'now', ok: string) => {
     setBusy(true)
     setMsg(null)
     try {
@@ -201,18 +211,18 @@ export function FollowUpItem({ t, onDone }: { t: Task; onDone: () => void }) {
 
   return (
     <div className="item">
-      <div className="o"><span className="tag">Handed to {t.follow_up_owner || 'the owner'}</span><span>Due back {fmtDate(t.due_date)}</span></div>
+      <div className="o"><span className="tag">{w.tag(t.follow_up_owner || 'the owner')}</span><span>Due back {fmtDate(t.due_date)}</span></div>
       <div className="t">{t.title}</div>
-      <div className="meta">Has it come back, and is it right?</div>
+      <div className="meta">{w.ask}</div>
       {t.handover && (
         <>
-          <button className="linkbtn" style={{ marginTop: 6 }} onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} the handover that was sent</button>
-          {show && <div className="content">{t.handover}</div>}
+          <button className="linkbtn" style={{ marginTop: 6 }} onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} {w.show}</button>
+          {show && <div className="content">{t.notes || t.handover}</div>}
         </>
       )}
       <div className="toolbar">
-        <button className="btn primary" disabled={busy} onClick={() => go('delivered', 'Closed. The original task is closed too.')}>Delivered, close it</button>
-        <button className="btn" disabled={busy} onClick={() => go('chase', 'The team is drafting a chaser for you to approve.')}>Not yet, draft a chaser</button>
+        <button className="btn primary" disabled={busy} onClick={() => go('delivered', w.closed)}>{w.done}</button>
+        <button className="btn" disabled={busy} onClick={() => go('chase', 'The team is drafting a chaser for you to approve.')}>{w.chase}</button>
         <button className="btn" disabled={busy} onClick={() => go('snooze', 'Checking again in a week.')}>Give it another week</button>
       </div>
       <MsgLine msg={msg} />

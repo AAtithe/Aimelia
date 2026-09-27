@@ -17,9 +17,18 @@
 Triage, Planner, Chief of Staff, an optional Finance Specialist and a Reviewer work each task in turn. Workers share one
 draft; reviewers score it and send it back until approved or the revision limit is reached. Agents ask Tom only what
 blocks them. Triage decides Do, Delegate, Defer or Drop; approving a handover schedules a follow-up, approving Defer parks
-the task, approving Drop closes it. Routines create recurring work ahead of time; tasks untouched for 14 days go back
+the task, approving Drop closes it. Approving an email or a call schedules a check a week later (Automation sets the days; 0 turns it off), so
+nothing sent is forgotten: has the reply come, did the call happen. A task gets one check, not one per action. At the
+check Tom closes it, gives it another week, or has the team draft a chaser, and approving the chaser schedules the next
+check. Routines create recurring work ahead of time; tasks untouched for 14 days go back
 through Triage; Tom's edits and send-backs become lessons every agent sees. Facts can come from WSCIP and Payroll Command
 Center through a fixed list of read-only lookups.
+
+## Today
+
+Today has a section for each kind of thing waiting on Tom: Questions, To approve, Follow-ups (due now, and the checks
+coming up, each of which can be brought forward) and, when there are any, Failed runs. It opens on the first section with
+something in it; the figures along the top open their section.
 
 ## Questions for Tom
 

@@ -254,6 +254,8 @@ export const SCHEMA: string[] = [
   `ALTER TABLE sign_in_attempts ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT ''`,
   // ---------------------------------------------------------------- task imports
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source text`,
+  // Days after an approved email or call that Aimelia checks it came back; 0 switches it off. Handovers always follow up on their due date.
+  `ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS follow_up_days int NOT NULL DEFAULT 7`,
   `CREATE TABLE IF NOT EXISTS imports (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     source text NOT NULL,

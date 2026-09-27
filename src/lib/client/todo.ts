@@ -67,6 +67,7 @@ export interface Task {
   routine_id: string | null
   scheduled_for: string | null
   follow_up_owner: string | null
+  follow_up_type?: 'delegate' | 'email' | 'call' | null
   calendar_event: { id: string; start: string; end: string; link?: string } | null
   stale_nudged_at: string | null
   source?: string | null
@@ -101,6 +102,7 @@ export interface Pipeline {
   house_rules: string
   team_directory: string
   stale_days: number
+  follow_up_days: number
   lessons_in_context: number
   brief_enabled: boolean
   brief_time: string
@@ -153,6 +155,7 @@ export interface Briefing {
   actions: Action[]
   failed: Task[]
   follow_ups: Task[]
+  upcoming_follow_ups?: Task[]
   providers: Record<string, boolean>
   channels: Record<string, boolean>
   sources: Record<string, boolean>

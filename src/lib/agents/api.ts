@@ -14,7 +14,7 @@ import { bookFocus, CalendarError } from './calendarBlocks'
 import { learningStats, recordLesson } from './lessons'
 import { buildBrief, channels, send } from './notify'
 import { getPipeline, logEvent, processQueue, seedDefaults, splitCapture } from './orchestrator'
-import { deferTask, firstDue, scheduleFollowUp, touch, type Cadence } from './schedule'
+import { deferTask, firstDue, FOLLOW_UP_KINDS, scheduleFollowUp, touch, type Cadence } from './schedule'
 import { csvItems, fingerprint, jobState, queueImport, recentJobs, runImportJobs, type JobKind, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
 import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
@@ -45,7 +45,7 @@ const AgentPatch = AgentIn.partial()
 const Reorder = z.object({ ids: z.array(z.string()) })
 const PipelinePatch = z.object({
   max_revisions: z.number().int().min(0).max(5), approval_threshold: z.number().min(0).max(10), max_questions_per_run: z.number().int().min(1).max(10),
-  auto_run: z.boolean(), house_rules: z.string(), team_directory: z.string(), stale_days: z.number().int().min(0).max(365),
+  auto_run: z.boolean(), house_rules: z.string(), team_directory: z.string(), stale_days: z.number().int().min(0).max(365), follow_up_days: z.number().int().min(0).max(60),
   lessons_in_context: z.number().int().min(0).max(30), brief_enabled: z.boolean(), brief_time: hhmm, brief_weekends: z.boolean(),
   work_start: hhmm, work_end: hhmm, focus_minutes: z.number().int().min(15).max(480), use_ws_systems: z.boolean(),
 }).partial()
@@ -57,7 +57,7 @@ const ImportFile = z.object({ filename: z.string().trim().min(1).max(300), data:
   kind: z.enum(['document', 'meeting', 'list']).optional(), run_now: z.boolean().default(true), force: z.boolean().default(false) })
 const ImportTodo = z.object({ list_ids: z.array(z.string().min(1)).min(1), run_now: z.boolean().default(true) })
 const ImportAgain = z.object({ run_now: z.boolean().default(true), force: z.boolean().default(false) })
-const FollowUp = z.object({ outcome: z.enum(['delivered', 'chase', 'snooze']), days: z.number().int().min(1).max(90).default(7) })
+const FollowUp = z.object({ outcome: z.enum(['delivered', 'chase', 'snooze', 'now']), days: z.number().int().min(1).max(90).default(7) })
 const Defer = z.object({ until: ymd, reason: z.string().default('') })
 const Book = z.object({ minutes: z.number().int().min(15).max(480).optional() })
 const RoutineIn = z.object({ title: z.string().trim().min(1).max(500), notes: z.string().default(''), priority: z.number().int().min(1).max(3).default(2),
@@ -77,7 +77,7 @@ export function taskOut(t: Row) {
     id: t.id, title: t.title, notes: t.notes, priority: t.priority, due_date: t.due_date, status: t.status, summary: t.summary,
     review_flag: t.review_flag, run_count: t.run_count, last_run_at: iso(t.last_run_at), created_at: iso(t.created_at), updated_at: iso(t.updated_at),
     open_questions: t.open_questions ?? 0, ready_actions: t.ready_actions ?? 0, kind: t.kind, parent_id: t.parent_id, routine_id: t.routine_id,
-    scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
+    scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, follow_up_type: t.kind === 'follow_up' ? t.follow_up?.type || 'delegate' : null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
     source: t.source ?? null,
   }
 }
@@ -96,7 +96,7 @@ const agentOut = (a: Row) => {
 }
 const pipelineOut = (p: Row) => ({
   max_revisions: p.max_revisions, approval_threshold: p.approval_threshold, max_questions_per_run: p.max_questions_per_run, auto_run: p.auto_run,
-  house_rules: p.house_rules, team_directory: p.team_directory, stale_days: p.stale_days, lessons_in_context: p.lessons_in_context,
+  house_rules: p.house_rules, team_directory: p.team_directory, stale_days: p.stale_days, follow_up_days: p.follow_up_days ?? 7, lessons_in_context: p.lessons_in_context,
   brief_enabled: p.brief_enabled, brief_time: p.brief_time, brief_weekends: p.brief_weekends, last_brief_date: p.last_brief_date,
   work_start: p.work_start, work_end: p.work_end, focus_minutes: p.focus_minutes, use_ws_systems: p.use_ws_systems,
 })
@@ -200,7 +200,7 @@ export const SUGGESTED_ROUTINES = [
 export const todoEndpoints: Endpoint[] = [
   ['GET', '/briefing', async () => {
     await seedDefaults()
-    const [questions, actions, failed, followUps, counts] = await Promise.all([
+    const [questions, actions, failed, followUps, upcoming, counts] = await Promise.all([
       // One entry per open question, with the other tasks it also holds. It shows while any of them waits on Tom.
       q(`SELECT qn.*, t.title AS task_title, t.priority AS task_priority,
         COALESCE((SELECT json_agg(json_build_object('task_id', ct.id, 'title', ct.title) ORDER BY c.created_at) FROM questions c JOIN tasks ct ON ct.id = c.task_id
@@ -212,6 +212,7 @@ export const todoEndpoints: Endpoint[] = [
       q(`SELECT a.*, t.title AS task_title, t.review_flag AS task_review_flag FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, t.created_at, a.position`),
       q(`${TASK_SELECT} WHERE t.status = 'failed' ORDER BY t.updated_at DESC`),
       q(`${TASK_SELECT} WHERE t.status = 'due' ORDER BY t.due_date`),
+      q(`${TASK_SELECT} WHERE t.kind = 'follow_up' AND t.status = 'scheduled' ORDER BY t.scheduled_for, t.created_at LIMIT 50`),
       q(`SELECT status, count(*)::int AS n FROM tasks GROUP BY status`),
     ])
     const memoryQuestions = (await one(`SELECT count(*)::int AS n FROM memory_questions WHERE status = 'open'`))?.n ?? 0
@@ -222,6 +223,7 @@ export const todoEndpoints: Endpoint[] = [
       questions: questions.map((x) => ({ ...questionOut(x), task_title: x.task_title })),
       actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_review_flag: a.task_review_flag })),
       failed: failed.map(taskOut), follow_ups: followUps.map((t) => ({ ...taskOut(t), handover: t.follow_up?.handover ?? null })),
+      upcoming_follow_ups: upcoming.map(taskOut),
       providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
     }
   }],
@@ -353,6 +355,10 @@ export const todoEndpoints: Endpoint[] = [
       }
     } else if (b.outcome === 'snooze') {
       await deferTask(p.id, addDays(londonToday(), b.days), 'More time given.')
+    } else if (b.outcome === 'now') {
+      if (t.status !== 'scheduled') fail(409, 'This check-in is not waiting.')
+      await q(`UPDATE tasks SET status = 'due', scheduled_for = $2 WHERE id = $1`, [p.id, londonToday()])
+      await logEvent(p.id, 'status', 'tom', { status: 'due', reason: 'brought forward' })
     } else {
       await requeue(p.id, 'not delivered: draft a chaser')
     }
@@ -431,9 +437,9 @@ export const todoEndpoints: Endpoint[] = [
     await touch(task.id)
     await logEvent(task.id, 'status', 'tom', { action: a!.title, status: 'approved', ...result })
     const verdict = String(d.verdict || '').toLowerCase()
-    if (a!.kind === 'delegate') {
-      const follow = await scheduleFollowUp(task, a!)
-      result.follow_up_on = follow.scheduled_for
+    if (FOLLOW_UP_KINDS[a!.kind]) {
+      const follow = await scheduleFollowUp(task, a!, londonToday(), (await getPipeline()).follow_up_days ?? 7)
+      if (follow) result.follow_up_on = follow.scheduled_for
       if (task.kind === 'follow_up') await q(`UPDATE tasks SET status = 'done' WHERE id = $1`, [task.id]) // the chaser replaces this check-in
     } else if (a!.kind === 'decision' && verdict === 'defer') {
       const until = isYmd(d.revisit) ? d.revisit : addDays(londonToday(), 14)

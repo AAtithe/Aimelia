@@ -288,6 +288,52 @@ describe('follow-ups, defer and drop', () => {
     expect(r.scheduled_for).toBe(addDays(londonToday(), 3))
   })
 
+  it('an approved email is checked a week later, once per task, and a chaser follows on', async () => {
+    const two = [action('Email to Corrigans FD'), { kind: 'call', title: 'Call Jo', content: 'Agenda', details: { with: 'Jo Hart' } }]
+    const s = use(new Scripted({ worker: [{ summary: 'v', actions: two }], reviewer: [approve()] }))
+    const t = await create({ title: 'Corrigans tronc sign-off' })
+    await processQueue()
+    const got = await get(t.id)
+    const week = addDays(londonToday(), 7)
+    expect((await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data.follow_up_on).toBe(week)
+    await req('POST', `/actions/${got.actions[1].id}/approve`, {})
+    const follows = (await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up')
+    expect(follows).toHaveLength(1)
+    expect(follows[0]).toMatchObject({ follow_up_type: 'email', follow_up_owner: 'a@b.com', status: 'scheduled', scheduled_for: week, parent_id: got.id })
+    expect(follows[0].title).toBe('Check a@b.com replied: Corrigans tronc sign-off')
+    expect((await get(got.id)).status).toBe('done')
+
+    const brief = (await req('GET', '/briefing')).data
+    expect(brief.upcoming_follow_ups.map((x: any) => x.id)).toEqual([follows[0].id])
+    expect((await req('POST', `/tasks/${follows[0].id}/follow-up`, { outcome: 'now' })).data.status).toBe('due')
+    expect((await req('POST', `/tasks/${follows[0].id}/follow-up`, { outcome: 'now' })).status).toBe(409)
+    expect((await req('GET', '/briefing')).data.follow_ups.map((x: any) => x.id)).toEqual([follows[0].id])
+
+    // No reply: the team drafts a chaser email; approving it replaces this check with the next one.
+    await req('POST', `/tasks/${follows[0].id}/follow-up`, { outcome: 'chase' })
+    await processQueue()
+    const ctx: any = s.calls.filter((c) => c.role === 'worker').at(-1)!.payload
+    expect(ctx.this_is_a_follow_up.instruction).toContain('polite chaser')
+    expect(ctx.this_is_a_follow_up.what_was_approved.map((x: any) => x.title)).toEqual(['Email to Corrigans FD', 'Call Jo'])
+    const chase = await get(follows[0].id)
+    await req('POST', `/actions/${chase.actions[0].id}/approve`, {})
+    expect((await get(follows[0].id)).status).toBe('done')
+    const next = (await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up' && x.status === 'scheduled')
+    expect(next).toHaveLength(1)
+    expect(next[0].parent_id).toBe(got.id)
+  })
+
+  it('email and call follow-ups can be switched off; handovers still follow up', async () => {
+    await req('PATCH', '/pipeline', { follow_up_days: 0 })
+    const { got } = await ready(action())
+    expect((await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data.follow_up_on).toBeUndefined()
+    const h = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Over to you', details: { owner: 'Mandy' } }, 'Payroll query')
+    expect((await req('POST', `/actions/${h.got.actions[0].id}/approve`, {})).data.follow_up_on).toBe(addDays(londonToday(), 7))
+    const nothing = await ready({ kind: 'note', title: 'Note', content: 'x', details: {} }, 'Just a note')
+    await req('PATCH', '/pipeline', { follow_up_days: 7 })
+    expect((await req('POST', `/actions/${nothing.got.actions[0].id}/approve`, {})).data.follow_up_on).toBeUndefined()
+  })
+
   it('approving Defer parks the task; approving Drop closes it', async () => {
     const { got } = await ready({ kind: 'decision', title: 'Defer', content: 'Not now.', details: { verdict: 'defer', revisit: '2026-11-02' } }, 'Refresh website copy')
     const r = (await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data
