@@ -9,6 +9,7 @@ export interface Question {
   id: string
   task_id: string
   task_title?: string
+  task_priority?: number
   asked_by: string
   question: string
   why: string
@@ -27,6 +28,7 @@ export interface Action {
   id: string
   task_id: string
   task_title?: string
+  task_priority?: number
   task_review_flag?: string | null
   kind: string
   title: string
@@ -70,6 +72,7 @@ export interface Task {
   scheduled_for: string | null
   follow_up_owner: string | null
   follow_up_type?: 'delegate' | 'email' | 'call' | null
+  closed_at?: string | null
   calendar_event: { id: string; start: string; end: string; link?: string } | null
   stale_nudged_at: string | null
   source?: string | null

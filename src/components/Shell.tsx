@@ -9,6 +9,7 @@ import { usePathname } from 'next/navigation'
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { api, raw, SIGNED_OUT, type Briefing } from '@/lib/client/todo'
 import { ChatLauncher } from '@/components/chat/Chat'
+import { BandSearch } from '@/components/tasks/Filters'
 
 type Nav = { href: string; label: string; count?: (b: Briefing) => number }
 const GROUPS: [string, Nav[]][] = [
@@ -50,7 +51,7 @@ export function Shell({ title, sub, actions, children }: { title: string; sub: s
     <>
       <header>
         <div className="ttl"><h1>{title}</h1><div className="sub">{sub}</div></div>
-        {actions && <div className="who">{actions}</div>}
+        <div className="who">{actions}<BandSearch /></div>
       </header>
       <div className="wrap">{children}</div>
     </>

@@ -6,6 +6,15 @@ import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+import { FilterBar, filterQuery, useSettled, NO_FILTERS, type Filters } from '@/components/tasks/Filters'
+import Link from 'next/link'
+
+/** Whether an item passes the filter bar: every word somewhere in its text, and the priority if one is picked. */
+function passes(f: Filters, priority: number | undefined, ...text: (string | null | undefined)[]) {
+  if (f.priority && String(priority ?? '') !== f.priority) return false
+  const hay = text.filter(Boolean).join(' ').toLowerCase()
+  return f.q.trim().toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))
+}
 
 /** Questions on the same task sit together, in the order the briefing gives them. */
 function byTask(questions: Question[]) {
@@ -14,9 +23,9 @@ function byTask(questions: Question[]) {
   return [...groups.values()]
 }
 
-type Section = 'questions' | 'approve' | 'todo' | 'follow' | 'failed'
+type Section = 'questions' | 'approve' | 'todo' | 'follow' | 'failed' | 'done'
 const SECTIONS: { key: Section; label: string }[] = [
-  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'failed', label: 'Failed runs' },
+  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'failed', label: 'Failed runs' }, { key: 'done', label: 'Completed' },
 ]
 const TAB_KEY = 'aimelia.today.tab'
 
@@ -27,6 +36,8 @@ export default function Today() {
   const [openTask, setOpenTask] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [chosen, setChosen] = useState<Section | null>(null)
+  const [f, setF] = useState<Filters>({ ...NO_FILTERS })
+  const [done, setDone] = useState<Task[] | null>(null)
   useEffect(() => { try { setChosen((sessionStorage.getItem(TAB_KEY) as Section) || null) } catch { /* private window */ } }, [])
   const pick = (t: Section) => { setChosen(t); try { sessionStorage.setItem(TAB_KEY, t) } catch { /* private window */ } }
 
@@ -60,13 +71,28 @@ export default function Today() {
   const overdue = (tasks || []).filter((t) => dueState(t.due_date, t.status)?.label === 'Overdue').length
   const noKeys = brief && !brief.providers.anthropic && !brief.providers.openai
   const dash = '–'
-  const upcoming = brief?.upcoming_follow_ups || []
-  const toDo = brief?.to_do || []
-  const sizes: Record<Section, number> = { questions: brief?.questions.length || 0, approve: brief?.actions.length || 0, todo: toDo.length,
-    follow: brief?.follow_ups.length || 0, failed: brief?.failed.length || 0 }
+  // The filter bar narrows every section; the figures along the top stay whole.
+  const questions = (brief?.questions || []).filter((x) => passes(f, x.task_priority, x.question, x.why, x.task_title, ...(x.also_for || []).map((t) => t.title)))
+  const approvals = (brief?.actions || []).filter((a) => passes(f, a.task_priority, a.title, a.content, a.task_title))
+  const toDo = (brief?.to_do || []).filter((a) => passes(f, a.task_priority, a.title, a.content, a.task_title))
+  const followUps = (brief?.follow_ups || []).filter((t) => passes(f, t.priority, t.title, t.notes))
+  const upcoming = (brief?.upcoming_follow_ups || []).filter((t) => passes(f, t.priority, t.title, t.notes))
+  const failed = (brief?.failed || []).filter((t) => passes(f, t.priority, t.title, t.notes, t.summary))
+  const sizes: Record<Section, number> = { questions: questions.length, approve: approvals.length, todo: toDo.length,
+    follow: followUps.length, failed: failed.length, done: done?.length || 0 }
   // Until Tom picks one, open the first section with something in it.
-  const tab: Section = chosen && (chosen !== 'failed' || sizes.failed) ? chosen
+  const tab: Section = chosen && (chosen !== 'failed' || brief?.failed.length) ? chosen
     : (['questions', 'approve', 'todo', 'follow', 'failed'] as Section[]).find((k) => sizes[k]) || 'questions'
+  // Completed work, the last month of it, searched on the server with the same filters.
+  const settled = useSettled(f, 250)
+  const doneQs = filterQuery({ ...settled, view: 'done', closed: '30' }, { limit: '100' })
+  useEffect(() => {
+    if (tab !== 'done') return
+    let live = true
+    api<Task[]>(`/tasks?${doneQs}`).then((r) => live && setDone(r)).catch((e) => live && setMsg({ ok: false, text: e.message }))
+    return () => { live = false }
+  }, [tab, doneQs, brief])
+
   const checkNow = async (id: string) => {
     try { await api(`/tasks/${id}/follow-up`, { method: 'POST', body: { outcome: 'now' } }); load() } catch (e: any) { setMsg({ ok: false, text: e.message }) }
   }
@@ -87,18 +113,19 @@ export default function Today() {
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
           <p className="cap today-flow">Answer the questions, approve the work, do what you approved, then check it came back.{working ? ` The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</p>
+          <FilterBar f={f} set={setF} full={false} />
           <div className="main-tabs today-tabs" role="tablist">
             {SECTIONS.filter((x) => x.key !== 'failed' || brief.failed.length).map((x) => (
               <button key={x.key} role="tab" aria-selected={tab === x.key} className={`main-tab-btn ${tab === x.key ? 'active' : ''}`} onClick={() => pick(x.key)}>
-                {x.label} <span className="hcount">{sizes[x.key]}</span>
+                {x.label}{x.key !== 'done' && <span className="hcount">{sizes[x.key]}</span>}
               </button>
             ))}
           </div>
 
           {tab === 'questions' && (
-            <div className="card"><h2>Answer these so the team can finish <span className="hcount">{brief.questions.length}</span></h2>
-              {brief.questions.length === 0 ? <div className="emptyrow">No questions for you. {working ? `The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</div>
-                : byTask(brief.questions).map((g) => g.length === 1 ? <QuestionItem key={g[0].id} q={g[0]} onDone={load} /> : (
+            <div className="card"><h2>Answer these so the team can finish <span className="hcount">{questions.length}</span></h2>
+              {questions.length === 0 ? <div className="emptyrow">{brief.questions.length ? 'No question matches the filter.' : 'No questions for you.'}</div>
+                : byTask(questions).map((g) => g.length === 1 ? <QuestionItem key={g[0].id} q={g[0]} onDone={load} /> : (
                   <div key={g[0].task_id} className="qgroup">
                     <div className="qgroup-h"><span className="tag">{g[0].task_title}</span><span className="cap">{g.length} questions on this task</span></div>
                     {g.map((q) => <QuestionItem key={q.id} q={q} onDone={load} showTask={false} />)}
@@ -107,9 +134,9 @@ export default function Today() {
           )}
 
           {tab === 'approve' && (
-            <div className="card"><h2>Ready for your approval <span className="hcount">{brief.actions.length}</span></h2>
-              {brief.actions.length === 0 ? <div className="emptyrow">Nothing to approve. Finished work appears here once the reviewer has checked it.</div>
-                : brief.actions.map((a) => <ActionItem key={a.id} a={a} onDone={load} />)}</div>
+            <div className="card"><h2>Ready for your approval <span className="hcount">{approvals.length}</span></h2>
+              {approvals.length === 0 ? <div className="emptyrow">{brief.actions.length ? 'Nothing matches the filter.' : 'Nothing to approve. Finished work appears here once the reviewer has checked it.'}</div>
+                : approvals.map((a) => <ActionItem key={a.id} a={a} onDone={load} />)}</div>
           )}
 
           {tab === 'todo' && (
@@ -119,9 +146,9 @@ export default function Today() {
           )}
 
           {tab === 'follow' && (<>
-            <div className="card"><h2>Due for a check <span className="hcount">{brief.follow_ups.length}</span></h2>
-              {brief.follow_ups.length === 0 ? <div className="emptyrow">Nothing due back today.</div>
-                : brief.follow_ups.map((t) => <FollowUpItem key={t.id} t={t} onDone={load} />)}</div>
+            <div className="card"><h2>Due for a check <span className="hcount">{followUps.length}</span></h2>
+              {followUps.length === 0 ? <div className="emptyrow">Nothing due back today.</div>
+                : followUps.map((t) => <FollowUpItem key={t.id} t={t} onDone={load} />)}</div>
             <div className="card"><h2>Coming up <span className="hcount">{upcoming.length}</span></h2>
               {upcoming.length === 0 ? <div className="emptyrow">Nothing scheduled. Approving an email, a call or a handover schedules a check a week later.</div>
                 : <div className="tblwrap"><table>
@@ -138,8 +165,19 @@ export default function Today() {
           </>)}
 
           {tab === 'failed' && brief.failed.length > 0 && (
-            <div className="card"><h2>Runs that failed <span className="hcount">{brief.failed.length}</span></h2>
-              <TaskTable tasks={brief.failed} onOpen={setOpenTask} /></div>
+            <div className="card"><h2>Runs that failed <span className="hcount">{failed.length}</span></h2>
+              {failed.length ? <TaskTable tasks={failed} onOpen={setOpenTask} /> : <div className="emptyrow">Nothing matches the filter.</div>}</div>
+          )}
+
+          {tab === 'done' && (
+            <div className="card"><h2>Completed in the last month <span className="hcount">{done ? done.length : ''}</span></h2>
+              {!done ? <div className="emptyrow">Reading ...</div>
+                : done.length === 0 ? <div className="emptyrow">{f.q || f.priority ? 'Nothing completed in the last month matches the filter.' : 'Nothing completed in the last month.'}</div>
+                : <TaskTable tasks={done} onOpen={setOpenTask} />}
+              <div className="body" style={{ paddingTop: 8, paddingBottom: 12 }}>
+                <Link href={`/tasks?${filterQuery({ ...settled, view: 'done' })}`}>See everything completed, with more filters, in All tasks</Link>
+              </div>
+            </div>
           )}
         </>
       )}

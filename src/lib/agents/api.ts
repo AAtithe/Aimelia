@@ -72,7 +72,9 @@ const LessonPatch = z.object({ active: z.boolean() })
 
 // ---------------------------------------------------------------- serialisers
 
-const TASK_SELECT = `SELECT t.*,
+// When a task closed: its last move to done, or when it was last changed if that was not logged.
+const CLOSED_AT = `COALESCE((SELECT max(e.created_at) FROM events e WHERE e.task_id = t.id AND e.kind = 'status' AND e.content->>'status' = 'done'), t.updated_at)`
+const TASK_SELECT = `SELECT t.*, CASE WHEN t.status = 'done' THEN ${CLOSED_AT} END AS closed_at,
   (SELECT count(*)::int FROM questions qn WHERE qn.task_id = t.id AND qn.status IN ${BLOCKING}) AS open_questions,
   (SELECT count(*)::int FROM actions a WHERE a.task_id = t.id AND a.status = 'proposed') AS ready_actions FROM tasks t`
 
@@ -81,7 +83,7 @@ export function taskOut(t: Row) {
     id: t.id, title: t.title, notes: t.notes, priority: t.priority, due_date: t.due_date, status: t.status, summary: t.summary,
     review_flag: t.review_flag, run_count: t.run_count, last_run_at: iso(t.last_run_at), created_at: iso(t.created_at), updated_at: iso(t.updated_at),
     open_questions: t.open_questions ?? 0, ready_actions: t.ready_actions ?? 0, kind: t.kind, parent_id: t.parent_id, routine_id: t.routine_id,
-    scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, follow_up_type: t.kind === 'follow_up' ? t.follow_up?.type || 'delegate' : null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
+    scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, follow_up_type: t.kind === 'follow_up' ? t.follow_up?.type || 'delegate' : null, closed_at: t.closed_at ? iso(t.closed_at) : null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
     source: t.source ?? null,
   }
 }
@@ -111,6 +113,61 @@ const lessonOut = (l: Row) => ({ id: l.id, source: l.source, action_kind: l.acti
   note: l.note, active: l.active, created_at: iso(l.created_at) })
 
 // ---------------------------------------------------------------- helpers
+
+/** Which statuses each view on the task list covers. */
+export const TASK_VIEWS: Record<string, string[] | null> = {
+  open: ['queued', 'processing', 'needs_input', 'ready', 'doing', 'failed', 'scheduled', 'due'],
+  waiting: ['needs_input', 'ready', 'doing', 'due', 'failed'], // waiting on Tom
+  team: ['queued', 'processing'], // with the agents
+  parked: ['scheduled'],
+  done: ['done'],
+  all: null,
+}
+
+/**
+ * The task list, searched and filtered. q matches every word somewhere in the task: its title, brief and summary,
+ * its actions, and its questions and answers. view picks a group of statuses (status= one exact status);
+ * priority, kind, due (overdue, week, none) and closed (closed within this many days) narrow it; sort orders it.
+ */
+function taskQuery(p: URLSearchParams) {
+  const where: string[] = []
+  const vals: unknown[] = []
+  const add = (v: unknown) => { vals.push(v); return `$${vals.length}` }
+  const words = (p.get('q') || '').trim().split(/\s+/).filter(Boolean).slice(0, 8)
+  for (const w of words) {
+    const like = add(`%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
+    where.push(`(t.title ILIKE ${like} OR t.notes ILIKE ${like} OR t.summary ILIKE ${like}
+      OR EXISTS (SELECT 1 FROM actions a WHERE a.task_id = t.id AND a.status <> 'superseded' AND (a.title ILIKE ${like} OR a.content ILIKE ${like}))
+      OR EXISTS (SELECT 1 FROM questions qn WHERE qn.task_id = t.id AND (qn.question ILIKE ${like} OR qn.answer ILIKE ${like})))`)
+  }
+  const status = p.get('status')
+  const view = p.get('view') || (p.get('include_done') === 'true' ? 'all' : 'open')
+  const statuses = status ? [status] : view in TASK_VIEWS ? TASK_VIEWS[view] : TASK_VIEWS.open
+  if (statuses) where.push(`t.status = ANY(${add(statuses)}::text[])`)
+  const priority = Number(p.get('priority'))
+  if ([1, 2, 3].includes(priority)) where.push(`t.priority = ${add(priority)}`)
+  const kind = p.get('kind')
+  if (kind === 'task' || kind === 'follow_up' || kind === 'routine') where.push(`t.kind = ${add(kind)}`)
+  const today = londonToday()
+  const due = p.get('due')
+  if (due === 'overdue') where.push(`t.due_date < ${add(today)} AND t.status <> 'done'`)
+  else if (due === 'week') where.push(`t.due_date >= ${add(today)} AND t.due_date <= ${add(addDays(today, 7))}`)
+  else if (due === 'none') where.push(`t.due_date IS NULL`)
+  const closed = Number(p.get('closed'))
+  if (closed > 0) where.push(`t.status = 'done' AND ${CLOSED_AT} >= now() - (${add(Math.min(closed, 3650))}::int * interval '1 day')`)
+  const sorts: Record<string, string> = {
+    priority: 't.priority, t.created_at DESC',
+    newest: 't.created_at DESC',
+    oldest: 't.created_at',
+    due: 't.due_date NULLS LAST, t.priority',
+    closed: `${CLOSED_AT} DESC NULLS LAST`,
+    // Title matches first, then work still open, then the newest.
+    relevance: `${words.length ? `(t.title ILIKE ${add(`%${words.join(' ')}%`)}) DESC, ` : ''}(t.status = 'done'), t.priority, t.created_at DESC`,
+  }
+  const sort = sorts[p.get('sort') || ''] || (words.length ? sorts.relevance : view === 'done' ? sorts.closed : sorts.priority)
+  const limit = Math.min(Math.max(Number(p.get('limit')) || 300, 1), 500)
+  return { sql: `${TASK_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${sort} LIMIT ${limit}`, vals }
+}
 
 async function getTask(id: string): Promise<Row> {
   return (await one(`${TASK_SELECT} WHERE t.id = $1`, [id])) || fail(404, 'Task not found.')
@@ -224,11 +281,11 @@ export const todoEndpoints: Endpoint[] = [
         WHERE qn.status = 'open' AND (t.status = 'needs_input' OR EXISTS (SELECT 1 FROM questions c JOIN tasks ct ON ct.id = c.task_id
           WHERE c.merged_into = qn.id AND c.status = 'merged' AND ct.status = 'needs_input'))
         ORDER BY t.priority, t.created_at, qn.created_at`),
-      q(`SELECT a.*, t.title AS task_title, t.review_flag AS task_review_flag FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, t.created_at, a.position`),
+      q(`SELECT a.*, t.title AS task_title, t.priority AS task_priority, t.review_flag AS task_review_flag FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, t.created_at, a.position`),
       q(`${TASK_SELECT} WHERE t.status = 'failed' ORDER BY t.updated_at DESC`),
       q(`${TASK_SELECT} WHERE t.status = 'due' ORDER BY t.due_date`),
       q(`${TASK_SELECT} WHERE t.kind = 'follow_up' AND t.status = 'scheduled' ORDER BY t.scheduled_for, t.created_at LIMIT 50`),
-      q(`SELECT a.*, t.title AS task_title FROM actions a JOIN tasks t ON t.id = a.task_id
+      q(`SELECT a.*, t.title AS task_title, t.priority AS task_priority FROM actions a JOIN tasks t ON t.id = a.task_id
          WHERE a.status = 'approved' AND t.status <> 'done' ORDER BY t.priority, a.approved_at NULLS FIRST, a.position`),
       q(`SELECT status, count(*)::int AS n FROM tasks GROUP BY status`),
     ])
@@ -237,22 +294,18 @@ export const todoEndpoints: Endpoint[] = [
     for (const r of counts) c[r.status] = r.n
     return {
       generated_at: new Date().toISOString(), counts: c,
-      questions: questions.map((x) => ({ ...questionOut(x), task_title: x.task_title })),
-      actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_review_flag: a.task_review_flag })),
+      questions: questions.map((x) => ({ ...questionOut(x), task_title: x.task_title, task_priority: x.task_priority })),
+      actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_priority: a.task_priority, task_review_flag: a.task_review_flag })),
       failed: failed.map(taskOut), follow_ups: followUps.map((t) => ({ ...taskOut(t), handover: t.follow_up?.handover ?? null })),
       upcoming_follow_ups: upcoming.map(taskOut),
-      to_do: toDo.map((a) => ({ ...actionOut(a), task_title: a.task_title })),
+      to_do: toDo.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_priority: a.task_priority })),
       providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
     }
   }],
 
   ['GET', '/tasks', async (req) => {
-    const u = new URL(req.url)
-    const status = u.searchParams.get('status')
-    const includeDone = u.searchParams.get('include_done') === 'true'
-    const rows = status ? await q(`${TASK_SELECT} WHERE t.status = $1 ORDER BY t.priority, t.created_at DESC`, [status])
-      : await q(`${TASK_SELECT} ${includeDone ? '' : `WHERE t.status <> 'done'`} ORDER BY t.priority, t.created_at DESC`)
-    return rows.map(taskOut)
+    const { sql, vals } = taskQuery(new URL(req.url).searchParams)
+    return (await q(sql, vals)).map(taskOut)
   }],
   ['POST', '/tasks', async (req) => {
     const b = await body(req, TaskIn)

@@ -568,3 +568,46 @@ describe('capture is never lost', () => {
     expect(r.data.map((t: any) => t.title)).toEqual(['Chase Bentleys P60s', 'Book the Soho pricing call'])
   })
 })
+
+describe('searching and filtering tasks', () => {
+  const list = async (qs: string) => (await req('GET', `/tasks?${qs}`)).data.map((t: any) => t.title)
+
+  it('searches every part of a task, filters by view, priority, kind and due date, and dates completed ones', async () => {
+    const today = londonToday()
+    const [a, b, c, d] = await Promise.all([
+      create({ title: 'Corrigans tronc sign-off', notes: 'Q3 figures', priority: 1, due_date: addDays(today, -2) }),
+      create({ title: 'Bentleys labour review', notes: 'Rota against 28% target', priority: 2, due_date: addDays(today, 3) }),
+      create({ title: 'Soho group pricing', notes: '', priority: 3 }),
+      create({ title: 'Old VAT return 100%_done', notes: '', priority: 2 }),
+    ])
+    await q(`INSERT INTO actions (task_id, kind, title, content) VALUES ($1, 'email_draft', 'Email Jo', 'Please sign the tronc schedule')`, [b.id])
+    await q(`INSERT INTO questions (task_id, question, answer, status) VALUES ($1, 'How many sites?', 'Six sites in Soho and Fitzrovia', 'answered')`, [c.id])
+    await q(`UPDATE tasks SET status = 'done' WHERE id = $1`, [d.id])
+    await q(`INSERT INTO events (task_id, kind, actor, content) VALUES ($1, 'status', 'tom', '{"status":"done"}')`, [d.id])
+
+    expect(await list('q=tronc')).toEqual(['Corrigans tronc sign-off', 'Bentleys labour review']) // title first, then the draft's text
+    expect(await list('q=fitzrovia')).toEqual(['Soho group pricing']) // an answer to a question
+    expect(await list('q=rota 28%25')).toEqual(['Bentleys labour review']) // every word, and % taken literally
+    expect(await list('q=100%25_')).toEqual([]) // open only by default
+    expect(await list('q=100%25_&view=all')).toEqual(['Old VAT return 100%_done'])
+    expect(await list('q=100x')).toEqual([])
+
+    expect(await list('view=done')).toEqual(['Old VAT return 100%_done'])
+    expect((await list('')).sort()).toEqual(['Bentleys labour review', 'Corrigans tronc sign-off', 'Soho group pricing'])
+    expect(await list('include_done=true')).toHaveLength(4)
+    expect(await list('priority=1')).toEqual(['Corrigans tronc sign-off'])
+    expect(await list('due=overdue')).toEqual(['Corrigans tronc sign-off'])
+    expect(await list('due=week')).toEqual(['Bentleys labour review'])
+    expect(await list('due=none')).toEqual(['Soho group pricing'])
+    expect(await list('kind=follow_up')).toEqual([])
+    expect(await list('view=waiting')).toEqual([])
+    expect(await list('sort=oldest&limit=1')).toHaveLength(1)
+
+    const done = (await req('GET', '/tasks?view=done&closed=30')).data
+    expect(done[0].closed_at).toBeTruthy()
+    await q(`UPDATE events SET created_at = now() - interval '60 days' WHERE task_id = $1`, [d.id])
+    expect(await list('view=done&closed=30')).toEqual([])
+    expect(await list('view=done&closed=90')).toEqual(['Old VAT return 100%_done'])
+    expect(a.id).toBeTruthy()
+  })
+})

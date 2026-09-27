@@ -31,7 +31,7 @@ export function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: strin
                 <td className="nowrap"><StatusPill status={t.status} /></td>
                 <td className="nowrap hide-sm">{PRIORITY_LABEL[t.priority]}</td>
                 <td className="nowrap">
-                  {t.due_date ? fmtDate(t.due_date) : <span className="cap">None set</span>}
+                  {t.status === 'done' ? <span className="cap">Completed {t.closed_at ? fmtDate(t.closed_at) : ''}</span> : t.due_date ? fmtDate(t.due_date) : <span className="cap">None set</span>}
                   {due && <div><span className={`pill ${due.pill}`}>{due.label}</span></div>}
                 </td>
               </tr>

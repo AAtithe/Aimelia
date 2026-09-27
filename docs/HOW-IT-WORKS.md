@@ -36,6 +36,17 @@ action on it is done. Marking an email, call or handover done schedules its chec
 date), unless Tom marks it done with no check needed. Approving a decision or a note settles it at once. It opens on the first section with
 something in it; the figures along the top open their section.
 
+## Finding tasks
+
+- **The search box** at the top right of every page searches every task, open or completed, as you type: titles, briefs,
+  summaries, the drafts, and the questions and their answers. Enter opens All tasks with the search; a match opens that task.
+- **All tasks** has the full filter bar: search, which tasks (Open, Waiting on you, With the team, Parked for later,
+  Completed, Everything), priority, kind, due date (past due, this week, none), when completed, and the order. The
+  filters are kept in the address, so a search can be bookmarked or sent back to.
+- **Today** has a search and priority filter that narrows every section, and a Completed section with the last month of
+  closed work.
+- `GET /api/todo/tasks` takes `q`, `view`, `status`, `priority`, `kind`, `due`, `closed` (days), `sort` and `limit`.
+
 ## Questions for Tom
 
 `src/lib/agents/questions.ts`. The questions the agents are waiting on are kept as one list, so Tom answers each thing once.
