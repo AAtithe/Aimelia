@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import './ws-house.css'
 import './house.css'
 
 export const metadata: Metadata = {

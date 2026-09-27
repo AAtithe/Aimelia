@@ -200,7 +200,7 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   due: 'Follow-up due',
 }
 
-// House pill classes (see app/tasks/house.css). Colour is meaning, not decoration.
+// House pill classes (from the shared src/app/ws-house.css). Colour is meaning, not decoration.
 export const STATUS_PILL: Record<TaskStatus, string> = {
   queued: 'Unscheduled',
   processing: 'Active',

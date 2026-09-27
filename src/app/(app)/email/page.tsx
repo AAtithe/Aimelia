@@ -110,8 +110,8 @@ function EmailDrawer({ email, onClose }: { email: Email; onClose: () => void }) 
 
   return (
     <>
-      <div className="drawer-bg" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-label="Email">
+      <div className="drawer-bg open" onClick={onClose} />
+      <aside className="drawer open" role="dialog" aria-label="Email">
         <div className="dh"><button className="dclose" onClick={onClose} aria-label="Close">&times;</button>
           <div className="o">{e.from_name ? `${e.from_name}, ` : ''}{e.from}, {londonTime(e.received)}</div><div className="t">{e.subject || '(no subject)'}</div></div>
         <div className="db">

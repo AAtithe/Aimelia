@@ -4,7 +4,7 @@
 
 | Area | Where |
 |---|---|
-| Pages (house style) | `src/app/(app)/*`, frame in `src/components/Shell.tsx`, styles in `src/app/house.css` |
+| Pages (house style) | `src/app/(app)/*`, frame in `src/components/Shell.tsx`; the shared house style is `src/app/ws-house.css`, a stamped copy of AAtithe/house-style (sync it, never edit it), and Aimelia's own styles are `src/app/house.css` |
 | Agent Tasks API | `/api/todo/*`, `src/lib/agents/api.ts` |
 | Email and meetings API | `/api/mail/*`, `src/lib/email/api.ts` |
 | Sign-in | `/api/setup` (first login), `/api/session` (email and password), `/api/account` (password, devices, keys, settings), `/api/auth/*` (Microsoft 365) |
