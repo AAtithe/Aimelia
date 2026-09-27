@@ -2,6 +2,7 @@
 import { getPipeline, processQueue, releaseStale, seedDefaults } from './agents/orchestrator'
 import { createDueRoutines, nudgeStale, wakeScheduled } from './agents/schedule'
 import { maybeSendMorning } from './agents/notify'
+import { runImportJobs } from './agents/imports'
 
 type Step = [name: string, run: () => Promise<unknown>]
 let extraSteps: Step[] = []
@@ -19,9 +20,14 @@ export async function tick(now: Date = new Date()) {
   await safe('released', () => releaseStale())
   await safe('woken', () => wakeScheduled())
   await safe('routines', async () => (await createDueRoutines()).length)
+  // Imports cut off mid-read (or queued when the run after the request did not start) finish here.
+  const started = Date.now()
+  await safe('imports', async () => (await runImportJobs({ limit: 1 })).finished)
   const pipeline = await getPipeline()
   await safe('stale', () => nudgeStale(pipeline.stale_days, now))
-  if (pipeline.auto_run) await safe('processed', () => processQueue({ limit: 20, budgetMs: 200_000 }))
+  // A long read above leaves less of the five minutes for the agents.
+  const left = 260_000 - (Date.now() - started)
+  if (pipeline.auto_run && left > 20_000) await safe('processed', () => processQueue({ limit: 20, budgetMs: Math.min(200_000, left - 20_000) }))
   for (const [name, run] of extraSteps) await safe(name, run)
   await safe('morning_brief', () => maybeSendMorning(pipeline, now))
   return report
