@@ -269,6 +269,7 @@ export const SCHEMA: string[] = [
     run_now boolean NOT NULL DEFAULT true,
     attempts int NOT NULL DEFAULT 0,
     error text,
+    warning text,
     task_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
     prior jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),

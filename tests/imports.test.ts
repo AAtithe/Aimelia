@@ -6,7 +6,7 @@ import { setModelTransport, type ModelCall } from '@/lib/llm'
 import { encrypt } from '@/lib/crypto'
 import { q } from '@/lib/db'
 import { docxToText, transcriptToText } from '@/lib/agents/importText'
-import { csvItems, runImportJobs, ukDate } from '@/lib/agents/imports'
+import { csvItems, runImportJobs, salvageTasks, ukDate } from '@/lib/agents/imports'
 import { call } from './helpers'
 
 const api = dispatcher('/api/todo', todoEndpoints)
@@ -62,6 +62,12 @@ describe('reading files', () => {
   it('reads a transcript without timings', () => {
     const vtt = 'WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n<v Tom Stanley>Mandy, can you chase the P60s by Friday?</v>\n\n2\n00:00:05.000 --> 00:00:06.000\n<v Mandy>Will do.</v>'
     expect(transcriptToText(vtt)).toBe('Tom Stanley: Mandy, can you chase the P60s by Friday?\nMandy: Will do.')
+  })
+
+  it('salvages complete tasks from a reply cut off part way', () => {
+    expect(salvageTasks('{"tasks": [{"title": "a } b"}, {"title": "c", "notes": "x\\"}"}, {"title": "d')).toEqual([{ title: 'a } b' }, { title: 'c', notes: 'x"}' }])
+    expect(salvageTasks('no list here')).toEqual([])
+    expect(salvageTasks('{"tasks": []} {"title": "not in the list"}')).toEqual([])
   })
 
   it('reads an Outlook tasks CSV: UK dates, priority, completed rows skipped', () => {
@@ -200,6 +206,45 @@ describe('PDFs, read by Claude', () => {
     expect(sent.messages[0].content[0]).toEqual({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: PDF.toString('base64') } })
     expect(sent.messages[0].content[1].type).toBe('text')
     expect(tasks.map((t: any) => t.title)).toEqual(['Sign off the Q3 tronc'])
+  })
+
+  it('a reply cut off part way keeps every task written in full, and says the rest was not read', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    // The reply that failed in production: fenced JSON, stopped in the middle of a task.
+    setModelTransport(async () => '```json\n{"tasks": [\n{"title":"Reconcile Micronet invoice","notes":"","owner":null,"priority":2,"due_date":null},\n'
+      + '{"title":"Chase Bentleys {P60s}","notes":"He said \\"Friday\\"","owner":"Mandy","priority":1,"due_date":"2026-10-02"},\n{"titl')
+    const { job, tasks } = await read(upload())
+    expect(job.status).toBe('done')
+    expect(tasks.map((t: any) => t.title)).toEqual(['Reconcile Micronet invoice', 'Chase Bentleys {P60s}'])
+    expect(tasks[1].notes).toContain('He said "Friday"')
+    expect(job.warning).toContain('the first 2 tasks were imported')
+  })
+
+  it('the prompt keeps each task short and does not repeat where it came from', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    replies.import = { tasks: [{ title: 'Reconcile Micronet invoice' }] }
+    await read(upload())
+    expect(models[0].system).toContain('never say where the task came from')
+    expect(models[0].system).toContain('keep every field short')
+    expect(models[0].partialOk).toBe(true)
+  })
+
+  it('a streamed reply stopped at the token limit is kept in part, not thrown away', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    setModelTransport(null)
+    const text = '{"tasks": [{"title": "Sign off the Q3 tronc"}, {"title": "Book the Bentl'
+    const events = [
+      ['message_start', { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-sonnet-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } }],
+      ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+      ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }],
+      ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+      ['message_delta', { type: 'message_delta', delta: { stop_reason: 'max_tokens', stop_sequence: null }, usage: { output_tokens: 32000 } }],
+      ['message_stop', { type: 'message_stop' }],
+    ]
+    on('POST', /\/v1\/messages$/, () => new Response(events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } }))
+    const { job, tasks } = await read(upload())
+    expect(tasks.map((t: any) => t.title)).toEqual(['Sign off the Q3 tronc'])
+    expect(job.warning).toContain('too long')
   })
 
   it('needs the Claude key, and says so before queueing', async () => {

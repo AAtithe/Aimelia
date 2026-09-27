@@ -20,7 +20,7 @@ type Status = {
   microsoft_todo_last: string | null
   jobs: Job[]
 }
-type Job = { id: string; status: 'queued' | 'reading' | 'done' | 'failed' | 'duplicate'; title: string; error: string | null
+type Job = { id: string; status: 'queued' | 'reading' | 'done' | 'failed' | 'duplicate'; title: string; error: string | null; warning: string | null
   prior: { imported_at: string | null; task_count: number } | null; created_at: string; started_at: string | null; finished_at: string | null }
 const active = (j: Job) => j.status === 'queued' || j.status === 'reading'
 const seconds = (from: string | null) => (from ? Math.max(0, Math.round((Date.now() - new Date(from).getTime()) / 1000)) : 0)
@@ -59,7 +59,7 @@ function useImport(onAdded: () => void) {
         try { job = (await api<{ job: Job }>(`/import/jobs/${job.id}`)).job } catch { /* a missed poll is retried */ }
       }
       const final = await api<{ job: Job; tasks: Task[] }>(`/import/jobs/${job.id}`)
-      if (final.job.status === 'done') setMsg({ ok: true, text: made(final.tasks) })
+      if (final.job.status === 'done') setMsg({ ok: !final.job.warning, text: [made(final.tasks), final.job.warning].filter(Boolean).join(' ') })
       else if (final.job.status === 'duplicate') {
         setMsg({ ok: false, text: `Already imported${final.job.prior?.imported_at ? ` on ${fmtDate(final.job.prior.imported_at)}` : ''} as ${final.job.prior?.task_count ?? 0} tasks.` })
         offerAgain()
@@ -87,7 +87,7 @@ function Jobs({ jobs }: { jobs: Job[] }) {
         <li key={j.id}><span className="who">{j.title}</span>{' '}
           {j.status === 'reading' ? `reading, ${elapsed(seconds(j.started_at))} so far`
             : j.status === 'queued' ? 'waiting to start'
-            : j.status === 'done' ? 'done'
+            : j.status === 'done' ? (j.warning ? `done in part: ${j.warning}` : 'done')
             : j.status === 'duplicate' ? 'already imported before'
             : `failed: ${j.error || 'the read did not finish'}`}
           <span className="when">{fmtDate(j.created_at)}</span></li>

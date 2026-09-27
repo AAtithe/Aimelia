@@ -33,6 +33,7 @@ export type ModelCall = {
   role: string // what the call is for: worker, reviewer, capture, lookup, triage, draft, brief ...
   payload?: unknown // structured input, for the mock and for tests
   timeoutMs?: number // give up after this long, with no retries (the caller retries); for work inside a time-limited request
+  partialOk?: boolean // a reply cut off at max_tokens is returned as it stands, for a caller that can use part of it
   pdf?: string // a base64 PDF, sent to Claude as a document block ahead of the first message; Claude only
 }
 export type Transport = (call: ModelCall & { provider: Exclude<Provider, 'auto'>; model: string }) => Promise<string>
@@ -90,7 +91,7 @@ const realTransport: Transport = async (call) => {
       ? await client.messages.stream(params, opts).finalMessage()
       : await client.messages.create(params, opts)
     if (res.stop_reason === 'refusal') throw new LLMError('Claude declined to read this.')
-    if (res.stop_reason === 'max_tokens') throw new LLMError('The reply was cut off before it finished. Try a shorter document.')
+    if (res.stop_reason === 'max_tokens' && !call.partialOk) throw new LLMError('The reply was cut off before it finished. Try a shorter document.')
     return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
   }
   if (call.pdf) throw new LLMError('Reading PDFs needs the Claude (Anthropic) API key.')

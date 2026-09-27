@@ -96,8 +96,10 @@ and pull out the actions for his agent team. An action is something someone agre
 happen next. Leave out discussion, background, and decisions that need nothing further. Merge duplicates. Keep the words used where
 they are clear. If the text is itself a list of tasks (a printed To Do list, a task report), every open item is an action;
 leave out items shown as completed. When a client, supplier or someone outside the firm owes something, the task is to chase them for it.
-For each action give a short imperative title; notes holding every detail that belongs to it (context, names, numbers, what was
-agreed, and which meeting or document it came from); the owner named for it, or null when it is Tom or nobody was named;
+For each action give a short imperative title; notes holding the details the title leaves out (context, names, numbers, what
+was agreed), or "" when there are none. Never repeat the title in the notes, and never say where the task came from: that is
+recorded separately. A long list must fit in one reply, so keep every field short. Give the owner named for it, or null when it is
+Tom or nobody was named;
 a priority (1 high, 2 normal, 3 low); and a due_date (YYYY-MM-DD) only if the text states or clearly implies one, reading dates
 the UK way (day first) and relative dates from today. If there are no actions, return an empty list.
 Respond with a single JSON object and nothing else:

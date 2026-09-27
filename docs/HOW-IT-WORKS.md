@@ -40,7 +40,8 @@ upload returns at once, the read runs after the response, and the screen polls i
 left. Claude streams its reply with room for its reasoning, and gives up after four minutes, inside the server's five.
 A read cut off by the server is picked up by the background timer after seven minutes and tried once more; after two
 tries it fails with advice to split the file. Two copies queued at once end with the second marked as a duplicate. The
-file is deleted from the job when it ends. Lists and CSVs are quick and are still imported in the request.
+file is deleted from the job when it ends. If Claude's reply is cut off part way through a long list, every task written in full before the
+cut is kept (up to 200 per import) and the job says the rest was not read, so the file can be split and the rest imported. Lists and CSVs are quick and are still imported in the request.
 
 Without an AI key, or if the AI fails, documents and notes (not PDFs) fall back to their bullets, numbered items and `Action:` lines,
 so an import is never lost. Each import is recorded by source and a fingerprint of its text (or the To Do or Fireflies
