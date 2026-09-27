@@ -1,4 +1,4 @@
-/* ws-house.css 1.1.0, sha256 2e3ea18823327f353dd826102085369e676ea33540d6e813a17e50b29686653c
+/* ws-house.css 1.2.0, sha256 4fb6cedee902f98adcd45a769c9fc8f4b707ef03157671ca11ec659dd1ea8941
    Shared by every Williams, Stanley & Co. product. Do not edit this copy:
    change AAtithe/house-style and run its sync into this file. */
 /* The Williams, Stanley & Co. house style, shared by every product.
@@ -90,10 +90,13 @@ header .sub{opacity:.82;font-size:13px;margin-top:4px}
 @media(max-width:780px){.filters{grid-template-columns:repeat(2,minmax(0,1fr)) auto}}
 @media(max-width:470px){.filters{grid-template-columns:minmax(0,1fr) auto}}
 .filters label{font-size:11.5px;font-weight:600;color:var(--muted);display:flex;flex-direction:column;gap:4px}
-.filters select,.filters input,.filters .btn{height:34px;line-height:1}
+/* Ticks and radios keep their own size inside the bar. */
+.filters select,.filters input:not([type=checkbox]):not([type=radio]),.filters .btn{height:34px;line-height:1}
 
 /* --- controls --- */
-select,input[type=search],input[type=date],input[type=text],input[type=number],input[type=email],input[type=password],input[type=tel],input[type=url],textarea{font:inherit;font-size:13px;font-weight:400;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background-color:#fff;color:var(--ink);min-width:0;width:100%;transition:border-color .12s,box-shadow .12s}
+select,input:not([type]),input[type=search],input[type=date],input[type=text],input[type=number],input[type=email],input[type=password],input[type=tel],input[type=url],textarea{font:inherit;font-size:13px;font-weight:400;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background-color:#fff;color:var(--ink);min-width:0;width:100%;transition:border-color .12s,box-shadow .12s}
+/* The chevron is a background image: a product rule that sets a select's
+   background shorthand wipes it. Set background-color instead. */
 select{appearance:none;-webkit-appearance:none;padding-right:28px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%231A5F88' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;cursor:pointer}
 select[multiple]{background-image:none;padding-right:9px}
 select:hover,input:hover,textarea:hover{border-color:var(--wsblue)}
