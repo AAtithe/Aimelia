@@ -14,9 +14,9 @@ function byTask(questions: Question[]) {
   return [...groups.values()]
 }
 
-type Section = 'questions' | 'approve' | 'follow' | 'failed'
+type Section = 'questions' | 'approve' | 'todo' | 'follow' | 'failed'
 const SECTIONS: { key: Section; label: string }[] = [
-  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'follow', label: 'Follow-ups' }, { key: 'failed', label: 'Failed runs' },
+  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'failed', label: 'Failed runs' },
 ]
 const TAB_KEY = 'aimelia.today.tab'
 
@@ -61,23 +61,24 @@ export default function Today() {
   const noKeys = brief && !brief.providers.anthropic && !brief.providers.openai
   const dash = '–'
   const upcoming = brief?.upcoming_follow_ups || []
-  const sizes: Record<Section, number> = { questions: brief?.questions.length || 0, approve: brief?.actions.length || 0,
+  const toDo = brief?.to_do || []
+  const sizes: Record<Section, number> = { questions: brief?.questions.length || 0, approve: brief?.actions.length || 0, todo: toDo.length,
     follow: brief?.follow_ups.length || 0, failed: brief?.failed.length || 0 }
   // Until Tom picks one, open the first section with something in it.
   const tab: Section = chosen && (chosen !== 'failed' || sizes.failed) ? chosen
-    : (['questions', 'approve', 'follow', 'failed'] as Section[]).find((k) => sizes[k]) || 'questions'
+    : (['questions', 'approve', 'todo', 'follow', 'failed'] as Section[]).find((k) => sizes[k]) || 'questions'
   const checkNow = async (id: string) => {
     try { await api(`/tasks/${id}/follow-up`, { method: 'POST', body: { outcome: 'now' } }); load() } catch (e: any) { setMsg({ ok: false, text: e.message }) }
   }
 
   return (
-    <Shell title="Today" sub="What needs you: questions from the team, work ready to approve, and checks on what you approved."
+    <Shell title="Today" sub="What needs you: questions from the team, work to approve, what you approved to do, and checks on it."
       actions={<><button className="btn ghost" onClick={load}>Refresh</button><button className="btn ghost" onClick={runAll}>Run the team now</button></>}>
       <div className="kpis">
         <div role="button" tabIndex={0} onClick={() => pick('questions')} onKeyDown={(e) => e.key === 'Enter' && pick('questions')} className={`kpi go ${brief?.questions.length ? 'warn' : 'none'}`}><span className="n">{brief ? brief.questions.length : dash}</span><span className="l">Questions for you</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('approve')} onKeyDown={(e) => e.key === 'Enter' && pick('approve')} className={`kpi go ${brief?.actions.length ? '' : 'none'}`}><span className="n">{brief ? brief.actions.length : dash}</span><span className="l">Ready to approve</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('follow')} onKeyDown={(e) => e.key === 'Enter' && pick('follow')} className={`kpi go ${brief?.follow_ups.length ? 'warn' : 'none'}`}><span className="n">{brief ? brief.follow_ups.length : dash}</span><span className="l">Follow-ups due</span></div>
-        <div className="kpi"><span className="n">{brief ? working : dash}</span><span className="l">Team working on</span></div>
+        <div role="button" tabIndex={0} onClick={() => pick('todo')} onKeyDown={(e) => e.key === 'Enter' && pick('todo')} className={`kpi go ${toDo.length ? '' : 'none'}`}><span className="n">{brief ? toDo.length : dash}</span><span className="l">Approved, to do</span></div>
         <div className={`kpi ${overdue ? 'alert' : ''}`}><span className="n">{tasks ? overdue : dash}</span><span className="l">Past their due date</span></div>
         <div className={`kpi ${c.failed ? 'alert' : ''}`}><span className="n">{brief ? c.failed || 0 : dash}</span><span className="l">Runs that failed</span></div>
       </div>
@@ -85,6 +86,7 @@ export default function Today() {
       {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
+          <p className="cap today-flow">Answer the questions, approve the work, do what you approved, then check it came back.{working ? ` The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</p>
           <div className="main-tabs today-tabs" role="tablist">
             {SECTIONS.filter((x) => x.key !== 'failed' || brief.failed.length).map((x) => (
               <button key={x.key} role="tab" aria-selected={tab === x.key} className={`main-tab-btn ${tab === x.key ? 'active' : ''}`} onClick={() => pick(x.key)}>
@@ -108,6 +110,12 @@ export default function Today() {
             <div className="card"><h2>Ready for your approval <span className="hcount">{brief.actions.length}</span></h2>
               {brief.actions.length === 0 ? <div className="emptyrow">Nothing to approve. Finished work appears here once the reviewer has checked it.</div>
                 : brief.actions.map((a) => <ActionItem key={a.id} a={a} onDone={load} />)}</div>
+          )}
+
+          {tab === 'todo' && (
+            <div className="card"><h2>Approved, for you to do <span className="hcount">{toDo.length}</span></h2>
+              {toDo.length === 0 ? <div className="emptyrow">Nothing waiting on you. What you approve lands here until you have sent it, made the call or used it.</div>
+                : toDo.map((a) => <ActionItem key={a.id} a={a} onDone={load} />)}</div>
           )}
 
           {tab === 'follow' && (<>

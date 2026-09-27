@@ -191,7 +191,12 @@ describe('the run loop', () => {
     const live = (await get(t.id)).actions.filter((x: any) => x.status === 'proposed')
     expect(live).toHaveLength(2)
     for (const x of live) await req('POST', `/actions/${x.id}/done`)
+    // A was approved but not yet carried out: the task is with Tom to do until it is.
+    expect((await get(t.id)).status).toBe('doing')
+    expect((await req('GET', '/briefing')).data.to_do.map((x: any) => x.id)).toEqual([a.id])
+    await req('POST', `/actions/${a.id}/done`, { follow_up: false })
     expect((await get(t.id)).status).toBe('done')
+    expect((await req('POST', `/actions/${a.id}/done`)).status).toBe(409)
   })
 
   it('records a failed run on the task', async () => {
@@ -260,7 +265,9 @@ describe('follow-ups, defer and drop', () => {
 
   it('approved handover schedules a follow-up; delivered closes both', async () => {
     const { got } = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Mandy, please own this.', details: { owner: 'Mandy', due: '2026-10-02' } })
-    expect((await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data.follow_up_on).toBe('2026-10-02')
+    const ap = (await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data
+    expect([ap.to_do, ap.follow_up_on, ap.task_status]).toEqual([true, undefined, 'doing'])
+    expect((await req('POST', `/actions/${got.actions[0].id}/done`, {})).data.follow_up_on).toBe('2026-10-02')
     const follow = (await req('GET', '/tasks')).data.find((t: any) => t.kind === 'follow_up')
     expect([follow.status, follow.follow_up_owner, follow.parent_id]).toEqual(['scheduled', 'Mandy', got.id])
     expect(await wakeScheduled('2026-10-01')).toBe(0)
@@ -276,6 +283,7 @@ describe('follow-ups, defer and drop', () => {
   it('chase gives agents the handover; snooze defers', async () => {
     const { got, s } = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Original handover', details: { owner: 'Mandy', due: '2026-10-02' } })
     await req('POST', `/actions/${got.actions[0].id}/approve`, {})
+    await req('POST', `/actions/${got.actions[0].id}/done`, {})
     const follow = (await req('GET', '/tasks')).data.find((t: any) => t.kind === 'follow_up')
     await wakeScheduled('2026-10-02')
     expect((await req('POST', `/tasks/${follow.id}/follow-up`, { outcome: 'chase' })).data.status).toBe('queued')
@@ -295,8 +303,10 @@ describe('follow-ups, defer and drop', () => {
     await processQueue()
     const got = await get(t.id)
     const week = addDays(londonToday(), 7)
-    expect((await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data.follow_up_on).toBe(week)
-    await req('POST', `/actions/${got.actions[1].id}/approve`, {})
+    for (const x of got.actions) expect((await req('POST', `/actions/${x.id}/approve`, {})).data.follow_up_on).toBeUndefined()
+    expect((await get(got.id)).status).toBe('doing')
+    expect((await req('POST', `/actions/${got.actions[0].id}/done`, {})).data.follow_up_on).toBe(week)
+    await req('POST', `/actions/${got.actions[1].id}/done`, {})
     const follows = (await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up')
     expect(follows).toHaveLength(1)
     expect(follows[0]).toMatchObject({ follow_up_type: 'email', follow_up_owner: 'a@b.com', status: 'scheduled', scheduled_for: week, parent_id: got.id })
@@ -316,7 +326,9 @@ describe('follow-ups, defer and drop', () => {
     expect(ctx.this_is_a_follow_up.instruction).toContain('polite chaser')
     expect(ctx.this_is_a_follow_up.what_was_approved.map((x: any) => x.title)).toEqual(['Email to Corrigans FD', 'Call Jo'])
     const chase = await get(follows[0].id)
-    await req('POST', `/actions/${chase.actions[0].id}/approve`, {})
+    for (const x of chase.actions) await req('POST', `/actions/${x.id}/approve`, {})
+    expect((await get(follows[0].id)).status).toBe('doing')
+    for (const x of chase.actions) await req('POST', `/actions/${x.id}/done`, {})
     expect((await get(follows[0].id)).status).toBe('done')
     const next = (await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up' && x.status === 'scheduled')
     expect(next).toHaveLength(1)
@@ -326,12 +338,21 @@ describe('follow-ups, defer and drop', () => {
   it('email and call follow-ups can be switched off; handovers still follow up', async () => {
     await req('PATCH', '/pipeline', { follow_up_days: 0 })
     const { got } = await ready(action())
-    expect((await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data.follow_up_on).toBeUndefined()
+    await req('POST', `/actions/${got.actions[0].id}/approve`, {})
+    expect((await req('POST', `/actions/${got.actions[0].id}/done`, {})).data.follow_up_on).toBeUndefined()
     const h = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Over to you', details: { owner: 'Mandy' } }, 'Payroll query')
-    expect((await req('POST', `/actions/${h.got.actions[0].id}/approve`, {})).data.follow_up_on).toBe(addDays(londonToday(), 7))
+    await req('POST', `/actions/${h.got.actions[0].id}/approve`, {})
+    expect((await req('POST', `/actions/${h.got.actions[0].id}/done`, {})).data.follow_up_on).toBe(addDays(londonToday(), 7))
+    // A note is settled by approving it: nothing to do, nothing to check.
     const nothing = await ready({ kind: 'note', title: 'Note', content: 'x', details: {} }, 'Just a note')
     await req('PATCH', '/pipeline', { follow_up_days: 7 })
-    expect((await req('POST', `/actions/${nothing.got.actions[0].id}/approve`, {})).data.follow_up_on).toBeUndefined()
+    const n = (await req('POST', `/actions/${nothing.got.actions[0].id}/approve`, {})).data
+    expect([n.to_do, n.follow_up_on, n.task_status, n.action.status]).toEqual([false, undefined, 'done', 'done'])
+    // Sent with no check wanted: done, and nothing scheduled.
+    const e = await ready(action(), 'One-off email')
+    await req('POST', `/actions/${e.got.actions[0].id}/approve`, {})
+    expect((await req('POST', `/actions/${e.got.actions[0].id}/done`, { follow_up: false })).data).toMatchObject({ task_status: 'done' })
+    expect((await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up' && x.parent_id === e.got.id)).toEqual([])
   })
 
   it('approving Defer parks the task; approving Drop closes it', async () => {

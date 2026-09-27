@@ -3,7 +3,7 @@
 
 // Browser client for the Aimelia API. Same origin, authenticated by the HttpOnly session cookie.
 
-export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'done' | 'failed' | 'scheduled' | 'due'
+export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'doing' | 'done' | 'failed' | 'scheduled' | 'due'
 
 export interface Question {
   id: string
@@ -37,6 +37,8 @@ export interface Action {
   review_score: number | null
   review_notes: string
   user_feedback: string | null
+  approved_at?: string | null
+  done_at?: string | null
 }
 
 export interface AgentEvent {
@@ -156,6 +158,7 @@ export interface Briefing {
   failed: Task[]
   follow_ups: Task[]
   upcoming_follow_ups?: Task[]
+  to_do?: Action[]
   providers: Record<string, boolean>
   channels: Record<string, boolean>
   sources: Record<string, boolean>
@@ -207,6 +210,7 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   processing: 'Agents working',
   needs_input: 'Needs your answer',
   ready: 'Ready to approve',
+  doing: 'With you to do',
   done: 'Done',
   failed: 'Failed',
   scheduled: 'Scheduled',
@@ -219,6 +223,7 @@ export const STATUS_PILL: Record<TaskStatus, string> = {
   processing: 'Active',
   needs_input: 'Atrisk',
   ready: 'Ontrack',
+  doing: 'Active',
   done: 'Done',
   failed: 'Overdue',
   scheduled: 'Parked',

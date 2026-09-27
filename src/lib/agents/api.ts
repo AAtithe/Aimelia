@@ -37,6 +37,7 @@ const Text = z.object({ text: z.string().trim().min(1) })
 const Answer = z.object({ answer: z.string().trim().min(1) })
 const ActionPatch = z.object({ title: z.string().optional(), content: z.string().optional(), details: z.record(z.string(), z.any()).optional() })
 const Approve = z.object({ create_outlook_draft: z.boolean().default(false) })
+const Done = z.object({ follow_up: z.boolean().default(true) })
 const Reject = z.object({ reason: z.string().default(''), rework: z.boolean().default(true) })
 const AgentIn = z.object({ name: z.string().trim().min(1).max(100), role: z.enum(['worker', 'reviewer']).default('worker'), description: z.string().default(''),
   instructions: z.string().trim().min(1), provider: provider.default('auto'), model: z.string().nullable().optional(), temperature: z.number().min(0).max(1).default(0.3),
@@ -87,7 +88,8 @@ const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.ask
   // A merged question reads as the one it was merged into, which is what Tom answers.
   ...(x.status === 'merged' && x.shared_question ? { question: x.shared_question, why: x.shared_why || x.why, shared_with: { question_id: x.merged_into, task_id: x.shared_task_id, title: x.shared_task } } : {}) })
 const actionOut = (a: Row) => ({ id: a.id, task_id: a.task_id, kind: a.kind, title: a.title, content: a.content, details: a.details || {}, status: a.status,
-  review_status: a.review_status, review_score: a.review_score, review_notes: a.review_notes, user_feedback: a.user_feedback, created_at: iso(a.created_at) })
+  review_status: a.review_status, review_score: a.review_score, review_notes: a.review_notes, user_feedback: a.user_feedback, created_at: iso(a.created_at),
+  approved_at: a.approved_at ? iso(a.approved_at) : null, done_at: a.done_at ? iso(a.done_at) : null })
 const eventOut = (e: Row) => ({ id: e.id, kind: e.kind, actor: e.actor, attempt: e.attempt, content: e.content, created_at: iso(e.created_at) })
 const agentOut = (a: Row) => {
   const p = resolveProvider(a.provider)
@@ -168,9 +170,18 @@ function importReply(saved: Saved, runNow: boolean) {
   return Response.json(saved.tasks.map(taskOut), { status: 201 })
 }
 
+/**
+ * Approved is decided, not done. Emails, calls, handovers, documents and checklists wait in To do until Tom
+ * marks them done; decisions and notes are settled by approving them.
+ */
+export const TO_DO_KINDS = new Set(['email_draft', 'call', 'delegate', 'document', 'checklist'])
+
+/** Nothing left to approve: the task is with Tom to do while approved actions wait, and done when none do. */
 async function closeIfSettled(taskId: string) {
-  await q(`UPDATE tasks SET status = 'done' WHERE id = $1 AND status = 'ready'
-           AND NOT EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'proposed')`, [taskId])
+  const r = await one(`UPDATE tasks SET status = CASE WHEN EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'approved') THEN 'doing' ELSE 'done' END
+           WHERE id = $1 AND status IN ('ready','doing')
+           AND NOT EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'proposed') RETURNING status`, [taskId])
+  if (r?.status === 'done') await logEvent(taskId, 'status', 'aimelia', { status: 'done', reason: 'every action is done' })
 }
 
 const taskStatus = async (id: string) => (await one(`SELECT status FROM tasks WHERE id = $1`, [id]))!.status as string
@@ -200,7 +211,7 @@ export const SUGGESTED_ROUTINES = [
 export const todoEndpoints: Endpoint[] = [
   ['GET', '/briefing', async () => {
     await seedDefaults()
-    const [questions, actions, failed, followUps, upcoming, counts] = await Promise.all([
+    const [questions, actions, failed, followUps, upcoming, toDo, counts] = await Promise.all([
       // One entry per open question, with the other tasks it also holds. It shows while any of them waits on Tom.
       q(`SELECT qn.*, t.title AS task_title, t.priority AS task_priority,
         COALESCE((SELECT json_agg(json_build_object('task_id', ct.id, 'title', ct.title) ORDER BY c.created_at) FROM questions c JOIN tasks ct ON ct.id = c.task_id
@@ -213,10 +224,12 @@ export const todoEndpoints: Endpoint[] = [
       q(`${TASK_SELECT} WHERE t.status = 'failed' ORDER BY t.updated_at DESC`),
       q(`${TASK_SELECT} WHERE t.status = 'due' ORDER BY t.due_date`),
       q(`${TASK_SELECT} WHERE t.kind = 'follow_up' AND t.status = 'scheduled' ORDER BY t.scheduled_for, t.created_at LIMIT 50`),
+      q(`SELECT a.*, t.title AS task_title FROM actions a JOIN tasks t ON t.id = a.task_id
+         WHERE a.status = 'approved' AND t.status <> 'done' ORDER BY t.priority, a.approved_at NULLS FIRST, a.position`),
       q(`SELECT status, count(*)::int AS n FROM tasks GROUP BY status`),
     ])
     const memoryQuestions = (await one(`SELECT count(*)::int AS n FROM memory_questions WHERE status = 'open'`))?.n ?? 0
-    const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
+    const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, doing: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
     for (const r of counts) c[r.status] = r.n
     return {
       generated_at: new Date().toISOString(), counts: c,
@@ -224,6 +237,7 @@ export const todoEndpoints: Endpoint[] = [
       actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_review_flag: a.task_review_flag })),
       failed: failed.map(taskOut), follow_ups: followUps.map((t) => ({ ...taskOut(t), handover: t.follow_up?.handover ?? null })),
       upcoming_follow_ups: upcoming.map(taskOut),
+      to_do: toDo.map((a) => ({ ...actionOut(a), task_title: a.task_title })),
       providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
     }
   }],
@@ -433,15 +447,13 @@ export const todoEndpoints: Endpoint[] = [
       result.draft_id = draft.id
       await q(`UPDATE actions SET details = details || $2::jsonb WHERE id = $1`, [p.id, json({ outlook_draft_id: draft.id })])
     }
-    await q(`UPDATE actions SET status = 'approved' WHERE id = $1`, [p.id])
+    const toDo = TO_DO_KINDS.has(a!.kind)
+    await q(`UPDATE actions SET status = $2, approved_at = now() WHERE id = $1`, [p.id, toDo ? 'approved' : 'done'])
     await touch(task.id)
     await logEvent(task.id, 'status', 'tom', { action: a!.title, status: 'approved', ...result })
+    result.to_do = toDo
     const verdict = String(d.verdict || '').toLowerCase()
-    if (FOLLOW_UP_KINDS[a!.kind]) {
-      const follow = await scheduleFollowUp(task, a!, londonToday(), (await getPipeline()).follow_up_days ?? 7)
-      if (follow) result.follow_up_on = follow.scheduled_for
-      if (task.kind === 'follow_up') await q(`UPDATE tasks SET status = 'done' WHERE id = $1`, [task.id]) // the chaser replaces this check-in
-    } else if (a!.kind === 'decision' && verdict === 'defer') {
+    if (a!.kind === 'decision' && verdict === 'defer') {
       const until = isYmd(d.revisit) ? d.revisit : addDays(londonToday(), 14)
       await q(`UPDATE actions SET status = 'superseded' WHERE task_id = $1 AND status = 'proposed'`, [task.id])
       await deferTask(task.id, until, "Triage recommended deferring.")
@@ -466,11 +478,21 @@ export const todoEndpoints: Endpoint[] = [
     else await closeIfSettled(task.id)
     return { action: actionOut(a!), task_status: await taskStatus(task.id) }
   }],
-  ['POST', '/actions/:id/done', async (_r, p) => {
-    const a = (await one(`UPDATE actions SET status = 'done' WHERE id = $1 RETURNING *`, [p.id])) || fail(404, 'Action not found.')
-    await touch(a!.task_id)
-    await closeIfSettled(a!.task_id)
-    return { action: actionOut(a!), task_status: await taskStatus(a!.task_id) }
+  // Tom has carried it out. An email, call or handover then gets its check, unless he says none is needed.
+  ['POST', '/actions/:id/done', async (req, p) => {
+    const b = await body(req, Done)
+    const a = (await one(`UPDATE actions SET status = 'done', done_at = now() WHERE id = $1 AND status IN ('approved','proposed') RETURNING *`, [p.id]))
+      || ((await one(`SELECT id FROM actions WHERE id = $1`, [p.id])) ? fail(409, 'That action is already settled.') : fail(404, 'Action not found.'))
+    const task = await getTask(a!.task_id)
+    await touch(task.id)
+    await logEvent(task.id, 'status', 'tom', { action: a!.title, status: 'done', ...(b.follow_up ? {} : { reason: 'no check needed' }) })
+    const result: Record<string, unknown> = {}
+    if (b.follow_up && FOLLOW_UP_KINDS[a!.kind]) {
+      const follow = await scheduleFollowUp(task, a!, londonToday(), (await getPipeline()).follow_up_days ?? 7)
+      if (follow) result.follow_up_on = follow.scheduled_for
+    }
+    await closeIfSettled(task.id)
+    return { action: actionOut((await one(`SELECT * FROM actions WHERE id = $1`, [p.id]))!), task_status: await taskStatus(task.id), ...result }
   }],
 
   ['GET', '/agents', async () => teamPayload()],
