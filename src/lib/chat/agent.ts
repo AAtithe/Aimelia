@@ -40,6 +40,7 @@ import { touch } from '../agents/schedule'
 import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources'
 import { addMemory, changeMemory, getMemory, keepNote, memoryForContext, moveChatMemory, rememberedFor } from '../memory/store'
 import { saveForLater } from '../planner/projects'
+import { addPoint, findReport, reportView, seedReports } from '../team/oneToOnes'
 import { calculate } from './calc'
 import { findPhones, hasPhone, recipientProblem, TURN_LIMITS, turnLimiter } from '../guard'
 
@@ -159,6 +160,39 @@ export const TOOLS: Record<string, Tool> = {
       const review = typeof a.review_on === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.review_on) ? a.review_on : null
       const r = await saveForLater({ title, notes: String(a.notes || ''), link: String(a.link || ''), review_on: review, kind: a.kind === 'project' ? 'project' : 'item' })
       return { kept: true, kind: r.kind, title: r.title, comes_back_on: r.review_on }
+    },
+  },
+  one_to_one_prep: {
+    about: 'Tom\'s direct reports and what is on the list for each 1-2-1: focus points, tasks that have cropped up (with where they stand), open tasks that mention them, the last 1-2-1\'s notes and the next date. Leave person empty for all of them',
+    args: '{"person": "name or area, e.g. James or Commercial; empty for everyone"}',
+    run: async (a) => {
+      await seedReports()
+      const who = String(a.person || '').trim()
+      const rows = who ? [await findReport(who)].filter(Boolean) : await q(`SELECT * FROM reports WHERE active ORDER BY position, created_at`)
+      if (!rows.length) return who ? `No direct report called ${who}. They are listed on 1-2-1 prep.` : 'No direct reports set up yet.'
+      return Promise.all(rows.map(async (r: any) => {
+        const v = await reportView(r)
+        return { name: v.name, area: v.area, next_1_2_1: v.next_on, last_1_2_1: v.last_held,
+          points: v.points.map((p) => ({ kind: p.kind, text: p.text, task: p.task ? `${p.task.title} (${p.task.status}${p.task.due_date ? `, due ${p.task.due_date}` : ''})` : null })),
+          cropped_up_not_on_list: v.cropped_up.map((t) => `${t.title} (${t.status})`), last_notes: clip(v.history[0]?.notes, 800) || null, prep_sheet: clip(v.prep, 2500) }
+      }))
+    },
+  },
+  add_one_to_one_point: {
+    about: 'Put something on the list for Tom\'s next 1-2-1 with a direct report: a focus point, or a task that has cropped up (give task_id to link a task). Only when Tom asks',
+    args: '{"person": "name or area", "text": "the point, in his words", "kind": "focus|task", "task_id": "optional task id from search_tasks"}',
+    run: async (a) => {
+      await seedReports()
+      const r = await findReport(String(a.person || ''))
+      if (!r) return `Not added: no direct report matches "${a.person}". They are listed on 1-2-1 prep.`
+      if (!String(a.text || '').trim() && !a.task_id) return 'Not added: say what to raise.'
+      try {
+        const p = await addPoint(r.id, { text: String(a.text || ''), kind: a.kind === 'task' ? 'task' : a.kind === 'focus' ? 'focus' : undefined,
+          task_id: a.task_id ? String(a.task_id) : null, source: 'chat' })
+        return { added: true, for: `${r.name} (${r.area})`, kind: p.kind, text: p.text, next_1_2_1: r.next_on }
+      } catch (e) {
+        return `Not added: ${(e as Error).message}`
+      }
     },
   },
   search_knowledge: {
@@ -403,7 +437,7 @@ How to work:
 - Use the tools for any fact about Tom's tasks, email, diary, knowledge base or clients. Never guess or invent one.
 - Put every sum through calculate and quote its results; never do arithmetic in your head.
 ${has('web_search') ? '- For outside facts that change (HMRC rates and thresholds, deadlines, legislation, news), use web_search and name the source.\n' : ''}- If a tool says something is unavailable or not connected, say so plainly rather than working around it.
-- Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget, save_for_later${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
+- Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget, save_for_later, add_one_to_one_point${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
   run only when Tom asks for that outcome. Then do it without asking again, and confirm exactly what you did.
 - When Tom tells you something lasting about himself, the firm, clients or how he wants things done, offer to remember it, or remember it if he says so.
 - Before answering about a client, a person, a date or how Tom likes something done, check search_memory as well as what you remember below.

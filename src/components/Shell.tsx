@@ -19,6 +19,7 @@ const GROUPS: [string, Nav[]][] = [
     { href: '/planner', label: 'Planner' },
     { href: '/tasks', label: 'All tasks' },
     { href: '/projects', label: 'Projects and ideas', count: (b) => b.due_back?.length ?? 0 },
+    { href: '/one-to-ones', label: '1-2-1 prep' },
     { href: '/import', label: 'Import tasks' },
     { href: '/routines', label: 'Routines' },
   ]],

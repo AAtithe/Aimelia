@@ -445,4 +445,46 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     applied_at timestamptz
   )`,
+  // ---------------------------------------------------------------- direct reports and their 1-2-1s
+  // Tom's direct reports. The five seeded on first use can be renamed, added to or removed; they are never seeded again.
+  `CREATE TABLE IF NOT EXISTS reports (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    area text NOT NULL DEFAULT '',
+    email text NOT NULL DEFAULT '',
+    notes text NOT NULL DEFAULT '',
+    position int NOT NULL DEFAULT 0,
+    active boolean NOT NULL DEFAULT true,
+    every_days int NOT NULL DEFAULT 14,
+    last_held text,
+    next_on text,
+    prep text,
+    prep_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  // What to raise at the next 1-2-1: a focus point, or a task that has cropped up (task_id links it to the task list).
+  `CREATE TABLE IF NOT EXISTS report_points (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id uuid NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    kind text NOT NULL DEFAULT 'focus',
+    text text NOT NULL,
+    task_id uuid REFERENCES tasks(id) ON DELETE SET NULL,
+    status text NOT NULL DEFAULT 'open',
+    outcome text NOT NULL DEFAULT '',
+    source text NOT NULL DEFAULT 'tom',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    discussed_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS report_points_report_idx ON report_points (report_id, status, created_at)`,
+  // Each 1-2-1 held: Tom's notes and the points it covered, as they stood.
+  `CREATE TABLE IF NOT EXISTS one_to_ones (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id uuid NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    held_on text NOT NULL,
+    notes text NOT NULL DEFAULT '',
+    points jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS one_to_ones_report_idx ON one_to_ones (report_id, held_on DESC)`,
 ]

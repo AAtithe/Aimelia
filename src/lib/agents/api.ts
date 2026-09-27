@@ -23,6 +23,7 @@ import { attachFiles, FILE_COLS, fileOut, readTaskFiles } from './documents'
 import { answerQuestion, BLOCKING, dismissQuestion } from './questions'
 import { memoryEndpoints } from '../memory/api'
 import { plannerEndpoints } from '../planner/api'
+import { reportEndpoints } from '../team/api'
 import { dueBack } from '../planner/projects'
 
 // ---------------------------------------------------------------- schemas
@@ -674,6 +675,7 @@ export const todoEndpoints: Endpoint[] = [
   }],
   ...memoryEndpoints,
   ...plannerEndpoints,
+  ...reportEndpoints,
 ]
 
 /** After Tom settles a question: every task it held counts as touched, and those with nothing left open go back to the team. */

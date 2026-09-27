@@ -209,11 +209,20 @@ function EventRow({ e }: { e: AgentEvent }) {
   )
 }
 
-/** The day it is planned for, how long it should take, and the project it belongs to. */
+/** The day it is planned for, how long it should take, the project it belongs to, and a 1-2-1 to raise it at. */
 function PlanFields({ task, onChanged }: { task: Task; onChanged: () => void }) {
   const [projects, setProjects] = useState<{ id: string; title: string }[]>([])
+  const [reports, setReports] = useState<{ id: string; name: string; area: string }[]>([])
+  const [raised, setRaised] = useState('')
   const [err, setErr] = useState('')
   useEffect(() => { api<{ projects: { id: string; title: string; kind: string }[] }>('/projects?kind=project').then((r) => setProjects(r.projects)).catch(() => {}) }, [])
+  useEffect(() => { api<{ reports: { id: string; name: string; area: string }[] }>('/reports?lite=true').then((r) => setReports(r.reports)).catch(() => {}) }, [])
+  const raise = async (id: string) => {
+    const r = reports.find((x) => x.id === id)
+    if (!r) return
+    try { await api(`/reports/${id}/points`, { method: 'POST', body: { task_id: task.id, kind: 'task' } }); setErr(''); setRaised(`On the list for your next 1-2-1 with ${r.name}.`) }
+    catch (e: any) { setErr(e.message) }
+  }
   const patch = async (b: Record<string, unknown>) => { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: b }); setErr(''); onChanged() } catch (e: any) { setErr(e.message) } }
   if (task.status === 'done') return null
   return (
@@ -232,6 +241,14 @@ function PlanFields({ task, onChanged }: { task: Task; onChanged: () => void }) 
             {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
           </select></label>
       </div>
+      {reports.length > 0 && (
+        <label className="fld"><span>Raise at a 1-2-1</span>
+          <select value="" onChange={(e) => e.target.value && raise(e.target.value)}>
+            <option value="">Add it to the list for ...</option>
+            {reports.map((r) => <option key={r.id} value={r.id}>{r.name}{r.area ? `, ${r.area}` : ''}</option>)}
+          </select></label>
+      )}
+      {raised && <div className="msg">{raised}</div>}
       {err && <div className="msg err">{err}</div>}
     </>
   )

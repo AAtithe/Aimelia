@@ -209,6 +209,10 @@ function mockReply(call: ModelCall): string {
       const got = (p.files || []).length ? ` I received ${p.files.join(', ')}, but cannot read it without a key.` : ''
       return out({ reply: `Placeholder reply: no AI key is set on the server, so I cannot read or answer yet.${got} Add the Claude (Anthropic) key in Settings.` })
     }
+    case 'one_to_one': {
+      const lines = [...(p.focus_points || []).map((t: string) => `- ${t}`), ...(p.tasks_cropped_up || []).map((t: any) => `- ${t.point}${t.task?.status ? ` (${t.task.status})` : ''}`)]
+      return `Placeholder prep: no AI key is set, so this is the list as it stands.\n${p.person?.name || ''}, ${p.person?.area || ''}\n${lines.join('\n') || 'Nothing on the list yet.'}`
+    }
     case 'triage':
       return out({ category: 'General', urgency: 3, confidence: 0, reasoning: 'Placeholder: no AI key is set.', action_required: 'Read and decide.' })
     case 'worker':
