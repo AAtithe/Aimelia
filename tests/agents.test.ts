@@ -191,7 +191,12 @@ describe('the run loop', () => {
     const live = (await get(t.id)).actions.filter((x: any) => x.status === 'proposed')
     expect(live).toHaveLength(2)
     for (const x of live) await req('POST', `/actions/${x.id}/done`)
+    // A was approved but not yet carried out: the task is with Tom to do until it is.
+    expect((await get(t.id)).status).toBe('doing')
+    expect((await req('GET', '/briefing')).data.to_do.map((x: any) => x.id)).toEqual([a.id])
+    await req('POST', `/actions/${a.id}/done`, { follow_up: false })
     expect((await get(t.id)).status).toBe('done')
+    expect((await req('POST', `/actions/${a.id}/done`)).status).toBe(409)
   })
 
   it('records a failed run on the task', async () => {
@@ -260,7 +265,9 @@ describe('follow-ups, defer and drop', () => {
 
   it('approved handover schedules a follow-up; delivered closes both', async () => {
     const { got } = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Mandy, please own this.', details: { owner: 'Mandy', due: '2026-10-02' } })
-    expect((await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data.follow_up_on).toBe('2026-10-02')
+    const ap = (await req('POST', `/actions/${got.actions[0].id}/approve`, {})).data
+    expect([ap.to_do, ap.follow_up_on, ap.task_status]).toEqual([true, undefined, 'doing'])
+    expect((await req('POST', `/actions/${got.actions[0].id}/done`, {})).data.follow_up_on).toBe('2026-10-02')
     const follow = (await req('GET', '/tasks')).data.find((t: any) => t.kind === 'follow_up')
     expect([follow.status, follow.follow_up_owner, follow.parent_id]).toEqual(['scheduled', 'Mandy', got.id])
     expect(await wakeScheduled('2026-10-01')).toBe(0)
@@ -276,6 +283,7 @@ describe('follow-ups, defer and drop', () => {
   it('chase gives agents the handover; snooze defers', async () => {
     const { got, s } = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Original handover', details: { owner: 'Mandy', due: '2026-10-02' } })
     await req('POST', `/actions/${got.actions[0].id}/approve`, {})
+    await req('POST', `/actions/${got.actions[0].id}/done`, {})
     const follow = (await req('GET', '/tasks')).data.find((t: any) => t.kind === 'follow_up')
     await wakeScheduled('2026-10-02')
     expect((await req('POST', `/tasks/${follow.id}/follow-up`, { outcome: 'chase' })).data.status).toBe('queued')
@@ -286,6 +294,65 @@ describe('follow-ups, defer and drop', () => {
     const r = (await req('POST', `/tasks/${follow.id}/follow-up`, { outcome: 'snooze', days: 3 })).data
     expect(r.status).toBe('scheduled')
     expect(r.scheduled_for).toBe(addDays(londonToday(), 3))
+  })
+
+  it('an approved email is checked a week later, once per task, and a chaser follows on', async () => {
+    const two = [action('Email to Corrigans FD'), { kind: 'call', title: 'Call Jo', content: 'Agenda', details: { with: 'Jo Hart' } }]
+    const s = use(new Scripted({ worker: [{ summary: 'v', actions: two }], reviewer: [approve()] }))
+    const t = await create({ title: 'Corrigans tronc sign-off' })
+    await processQueue()
+    const got = await get(t.id)
+    const week = addDays(londonToday(), 7)
+    for (const x of got.actions) expect((await req('POST', `/actions/${x.id}/approve`, {})).data.follow_up_on).toBeUndefined()
+    expect((await get(got.id)).status).toBe('doing')
+    expect((await req('POST', `/actions/${got.actions[0].id}/done`, {})).data.follow_up_on).toBe(week)
+    await req('POST', `/actions/${got.actions[1].id}/done`, {})
+    const follows = (await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up')
+    expect(follows).toHaveLength(1)
+    expect(follows[0]).toMatchObject({ follow_up_type: 'email', follow_up_owner: 'a@b.com', status: 'scheduled', scheduled_for: week, parent_id: got.id })
+    expect(follows[0].title).toBe('Check a@b.com replied: Corrigans tronc sign-off')
+    expect((await get(got.id)).status).toBe('done')
+
+    const brief = (await req('GET', '/briefing')).data
+    expect(brief.upcoming_follow_ups.map((x: any) => x.id)).toEqual([follows[0].id])
+    expect((await req('POST', `/tasks/${follows[0].id}/follow-up`, { outcome: 'now' })).data.status).toBe('due')
+    expect((await req('POST', `/tasks/${follows[0].id}/follow-up`, { outcome: 'now' })).status).toBe(409)
+    expect((await req('GET', '/briefing')).data.follow_ups.map((x: any) => x.id)).toEqual([follows[0].id])
+
+    // No reply: the team drafts a chaser email; approving it replaces this check with the next one.
+    await req('POST', `/tasks/${follows[0].id}/follow-up`, { outcome: 'chase' })
+    await processQueue()
+    const ctx: any = s.calls.filter((c) => c.role === 'worker').at(-1)!.payload
+    expect(ctx.this_is_a_follow_up.instruction).toContain('polite chaser')
+    expect(ctx.this_is_a_follow_up.what_was_approved.map((x: any) => x.title)).toEqual(['Email to Corrigans FD', 'Call Jo'])
+    const chase = await get(follows[0].id)
+    for (const x of chase.actions) await req('POST', `/actions/${x.id}/approve`, {})
+    expect((await get(follows[0].id)).status).toBe('doing')
+    for (const x of chase.actions) await req('POST', `/actions/${x.id}/done`, {})
+    expect((await get(follows[0].id)).status).toBe('done')
+    const next = (await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up' && x.status === 'scheduled')
+    expect(next).toHaveLength(1)
+    expect(next[0].parent_id).toBe(got.id)
+  })
+
+  it('email and call follow-ups can be switched off; handovers still follow up', async () => {
+    await req('PATCH', '/pipeline', { follow_up_days: 0 })
+    const { got } = await ready(action())
+    await req('POST', `/actions/${got.actions[0].id}/approve`, {})
+    expect((await req('POST', `/actions/${got.actions[0].id}/done`, {})).data.follow_up_on).toBeUndefined()
+    const h = await ready({ kind: 'delegate', title: 'Hand to Mandy', content: 'Over to you', details: { owner: 'Mandy' } }, 'Payroll query')
+    await req('POST', `/actions/${h.got.actions[0].id}/approve`, {})
+    expect((await req('POST', `/actions/${h.got.actions[0].id}/done`, {})).data.follow_up_on).toBe(addDays(londonToday(), 7))
+    // A note is settled by approving it: nothing to do, nothing to check.
+    const nothing = await ready({ kind: 'note', title: 'Note', content: 'x', details: {} }, 'Just a note')
+    await req('PATCH', '/pipeline', { follow_up_days: 7 })
+    const n = (await req('POST', `/actions/${nothing.got.actions[0].id}/approve`, {})).data
+    expect([n.to_do, n.follow_up_on, n.task_status, n.action.status]).toEqual([false, undefined, 'done', 'done'])
+    // Sent with no check wanted: done, and nothing scheduled.
+    const e = await ready(action(), 'One-off email')
+    await req('POST', `/actions/${e.got.actions[0].id}/approve`, {})
+    expect((await req('POST', `/actions/${e.got.actions[0].id}/done`, { follow_up: false })).data).toMatchObject({ task_status: 'done' })
+    expect((await req('GET', '/tasks')).data.filter((x: any) => x.kind === 'follow_up' && x.parent_id === e.got.id)).toEqual([])
   })
 
   it('approving Defer parks the task; approving Drop closes it', async () => {
@@ -499,5 +566,48 @@ describe('capture is never lost', () => {
     const r = await req('POST', '/capture', { text: '- Chase Bentleys P60s\n- Book the Soho pricing call', run_now: false })
     expect(r.status).toBe(201)
     expect(r.data.map((t: any) => t.title)).toEqual(['Chase Bentleys P60s', 'Book the Soho pricing call'])
+  })
+})
+
+describe('searching and filtering tasks', () => {
+  const list = async (qs: string) => (await req('GET', `/tasks?${qs}`)).data.map((t: any) => t.title)
+
+  it('searches every part of a task, filters by view, priority, kind and due date, and dates completed ones', async () => {
+    const today = londonToday()
+    const [a, b, c, d] = await Promise.all([
+      create({ title: 'Corrigans tronc sign-off', notes: 'Q3 figures', priority: 1, due_date: addDays(today, -2) }),
+      create({ title: 'Bentleys labour review', notes: 'Rota against 28% target', priority: 2, due_date: addDays(today, 3) }),
+      create({ title: 'Soho group pricing', notes: '', priority: 3 }),
+      create({ title: 'Old VAT return 100%_done', notes: '', priority: 2 }),
+    ])
+    await q(`INSERT INTO actions (task_id, kind, title, content) VALUES ($1, 'email_draft', 'Email Jo', 'Please sign the tronc schedule')`, [b.id])
+    await q(`INSERT INTO questions (task_id, question, answer, status) VALUES ($1, 'How many sites?', 'Six sites in Soho and Fitzrovia', 'answered')`, [c.id])
+    await q(`UPDATE tasks SET status = 'done' WHERE id = $1`, [d.id])
+    await q(`INSERT INTO events (task_id, kind, actor, content) VALUES ($1, 'status', 'tom', '{"status":"done"}')`, [d.id])
+
+    expect(await list('q=tronc')).toEqual(['Corrigans tronc sign-off', 'Bentleys labour review']) // title first, then the draft's text
+    expect(await list('q=fitzrovia')).toEqual(['Soho group pricing']) // an answer to a question
+    expect(await list('q=rota 28%25')).toEqual(['Bentleys labour review']) // every word, and % taken literally
+    expect(await list('q=100%25_')).toEqual([]) // open only by default
+    expect(await list('q=100%25_&view=all')).toEqual(['Old VAT return 100%_done'])
+    expect(await list('q=100x')).toEqual([])
+
+    expect(await list('view=done')).toEqual(['Old VAT return 100%_done'])
+    expect((await list('')).sort()).toEqual(['Bentleys labour review', 'Corrigans tronc sign-off', 'Soho group pricing'])
+    expect(await list('include_done=true')).toHaveLength(4)
+    expect(await list('priority=1')).toEqual(['Corrigans tronc sign-off'])
+    expect(await list('due=overdue')).toEqual(['Corrigans tronc sign-off'])
+    expect(await list('due=week')).toEqual(['Bentleys labour review'])
+    expect(await list('due=none')).toEqual(['Soho group pricing'])
+    expect(await list('kind=follow_up')).toEqual([])
+    expect(await list('view=waiting')).toEqual([])
+    expect(await list('sort=oldest&limit=1')).toHaveLength(1)
+
+    const done = (await req('GET', '/tasks?view=done&closed=30')).data
+    expect(done[0].closed_at).toBeTruthy()
+    await q(`UPDATE events SET created_at = now() - interval '60 days' WHERE task_id = $1`, [d.id])
+    expect(await list('view=done&closed=30')).toEqual([])
+    expect(await list('view=done&closed=90')).toEqual(['Old VAT return 100%_done'])
+    expect(a.id).toBeTruthy()
   })
 })

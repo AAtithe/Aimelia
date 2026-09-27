@@ -3,12 +3,13 @@
 
 // Browser client for the Aimelia API. Same origin, authenticated by the HttpOnly session cookie.
 
-export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'done' | 'failed' | 'scheduled' | 'due'
+export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'doing' | 'done' | 'failed' | 'scheduled' | 'due'
 
 export interface Question {
   id: string
   task_id: string
   task_title?: string
+  task_priority?: number
   asked_by: string
   question: string
   why: string
@@ -27,6 +28,7 @@ export interface Action {
   id: string
   task_id: string
   task_title?: string
+  task_priority?: number
   task_review_flag?: string | null
   kind: string
   title: string
@@ -37,6 +39,8 @@ export interface Action {
   review_score: number | null
   review_notes: string
   user_feedback: string | null
+  approved_at?: string | null
+  done_at?: string | null
 }
 
 export interface AgentEvent {
@@ -67,6 +71,8 @@ export interface Task {
   routine_id: string | null
   scheduled_for: string | null
   follow_up_owner: string | null
+  follow_up_type?: 'delegate' | 'email' | 'call' | null
+  closed_at?: string | null
   calendar_event: { id: string; start: string; end: string; link?: string } | null
   stale_nudged_at: string | null
   source?: string | null
@@ -126,6 +132,7 @@ export interface Pipeline {
   house_rules: string
   team_directory: string
   stale_days: number
+  follow_up_days: number
   lessons_in_context: number
   brief_enabled: boolean
   brief_time: string
@@ -178,6 +185,8 @@ export interface Briefing {
   actions: Action[]
   failed: Task[]
   follow_ups: Task[]
+  upcoming_follow_ups?: Task[]
+  to_do?: Action[]
   providers: Record<string, boolean>
   channels: Record<string, boolean>
   sources: Record<string, boolean>
@@ -231,6 +240,7 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   processing: 'Agents working',
   needs_input: 'Needs your answer',
   ready: 'Ready to approve',
+  doing: 'With you to do',
   done: 'Done',
   failed: 'Failed',
   scheduled: 'Scheduled',
@@ -243,6 +253,7 @@ export const STATUS_PILL: Record<TaskStatus, string> = {
   processing: 'Active',
   needs_input: 'Atrisk',
   ready: 'Ontrack',
+  doing: 'Active',
   done: 'Done',
   failed: 'Overdue',
   scheduled: 'Parked',

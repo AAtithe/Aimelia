@@ -18,12 +18,14 @@ export async function buildBrief() {
   const actions = await q(`SELECT a.title FROM actions a JOIN tasks t ON t.id = a.task_id
                            WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, a.position`)
   const followUps = await q(`SELECT title FROM tasks WHERE status = 'due' ORDER BY due_date`)
+  const toDo = await q(`SELECT a.title FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'approved' AND t.status <> 'done' ORDER BY t.priority, a.approved_at`)
   const overdue = (await q(`SELECT count(*)::int AS n FROM tasks WHERE status NOT IN ('done','scheduled') AND due_date < $1`, [londonToday()]))[0].n as number
   const planned = await q(`SELECT title FROM tasks WHERE planned_for = $1 AND status <> 'done' ORDER BY priority, created_at`, [londonToday()])
   const back = await q(`SELECT title, kind FROM projects WHERE status IN ('active', 'someday') AND review_on <= $1 ORDER BY review_on`, [londonToday()])
   const parts: string[] = []
   if (questions.length) parts.push(`${plural(questions.length, 'question')} to answer`)
   if (actions.length) parts.push(`${actions.length} ready to approve`)
+  if (toDo.length) parts.push(`${toDo.length} approved to do`)
   if (followUps.length) parts.push(`${plural(followUps.length, 'follow-up')} due`)
   if (overdue) parts.push(overdue === 1 ? '1 past its due date' : `${overdue} past their due date`)
   if (planned.length) parts.push(`${plural(planned.length, 'task')} planned for today`)
@@ -32,11 +34,12 @@ export async function buildBrief() {
     ...questions.slice(0, 3).map((x) => `Answer: ${x.question} (${x.title})`),
     ...followUps.slice(0, 3).map((x) => `Follow up: ${x.title}`),
     ...actions.slice(0, 4).map((x) => `Approve: ${x.title}`),
+    ...toDo.slice(0, 3).map((x) => `Do: ${x.title}`),
     ...planned.slice(0, 4).map((x) => `Today: ${x.title}`),
     ...back.slice(0, 3).map((x) => `Back to look at: ${x.title}${x.kind === 'project' ? ' (project review)' : ''}`),
   ]
   return { headline: parts.length ? parts.join(', ') : 'Nothing needs you this morning', lines, empty: !parts.length,
-    counts: { questions: questions.length, actions: actions.length, follow_ups: followUps.length, overdue, planned: planned.length, back: back.length } }
+    counts: { questions: questions.length, actions: actions.length, to_do: toDo.length, follow_ups: followUps.length, overdue, planned: planned.length, back: back.length } }
 }
 
 type Brief = Awaited<ReturnType<typeof buildBrief>>

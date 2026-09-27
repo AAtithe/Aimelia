@@ -17,9 +17,35 @@
 Triage, Planner, Chief of Staff, an optional Finance Specialist and a Reviewer work each task in turn. Workers share one
 draft; reviewers score it and send it back until approved or the revision limit is reached. Agents ask Tom only what
 blocks them. Triage decides Do, Delegate, Defer or Drop; approving a handover schedules a follow-up, approving Defer parks
-the task, approving Drop closes it. Routines create recurring work ahead of time; tasks untouched for 14 days go back
+the task, approving Drop closes it. Marking an approved email or call done schedules a check a week later (Automation sets the days; 0 turns it off), so
+nothing sent is forgotten: has the reply come, did the call happen. A task gets one check, not one per action. At the
+check Tom closes it, gives it another week, or has the team draft a chaser, and approving the chaser schedules the next
+check. Routines create recurring work ahead of time; tasks untouched for 14 days go back
 through Triage; Tom's edits and send-backs become lessons every agent sees. Facts can come from WSCIP and Payroll Command
 Center through a fixed list of read-only lookups.
+
+## Today
+
+Today follows the work through: answer, approve, do, check. It has a section for each: Questions, To approve, To do,
+Follow-ups (due now, and the checks coming up, each of which can be brought forward) and, when there are any, Failed runs.
+
+Approving decides; it does not do. An approved email, call, handover, document or checklist waits in To do with what to
+do with it (send it, make the call, send the handover, use it, work through it), the buttons to do it (open the email in
+your mail app, copy it, tick the steps) and a button to mark it done. The task shows as With you to do until every
+action on it is done. Marking an email, call or handover done schedules its check a week later (a handover on its due
+date), unless Tom marks it done with no check needed. Approving a decision or a note settles it at once. It opens on the first section with
+something in it; the figures along the top open their section.
+
+## Finding tasks
+
+- **The search box** at the top right of every page searches every task, open or completed, as you type: titles, briefs,
+  summaries, the drafts, and the questions and their answers. Enter opens All tasks with the search; a match opens that task.
+- **All tasks** has the full filter bar: search, which tasks (Open, Waiting on you, With the team, Parked for later,
+  Completed, Everything), priority, kind, due date (past due, this week, none), when completed, and the order. The
+  filters are kept in the address, so a search can be bookmarked or sent back to.
+- **Today** has a search and priority filter that narrows every section, and a Completed section with the last month of
+  closed work.
+- `GET /api/todo/tasks` takes `q`, `view`, `status`, `priority`, `kind`, `due`, `closed` (days), `sort` and `limit`.
 
 ## Questions for Tom
 

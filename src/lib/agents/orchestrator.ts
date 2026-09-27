@@ -24,11 +24,17 @@ import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
 import { BLOCKING, recordQuestions } from './questions'
 
+const FOLLOW_UP_INSTRUCTIONS = {
+  delegate: 'The work was delegated and has not come back. Draft a short, firm chaser to the owner (kind delegate, same owner, a new due date) and say what Tom should check.',
+  email: 'Tom emailed this a week ago and it is not settled. Draft a short, polite chaser to the same recipient (kind email_draft, same to, subject "Re: " and the original subject) that says plainly what is still needed and by when.',
+  call: 'A call was approved a week ago and has not happened or has left loose ends. Draft what gets it done: a short email to book it (kind email_draft) or, if it happened, the actions from it.',
+}
+
 export const ACTION_KINDS = new Set(['email_draft', 'document', 'checklist', 'decision', 'call', 'delegate', 'note'])
 
 export type Pipeline = {
   max_revisions: number; approval_threshold: number; max_questions_per_run: number; auto_run: boolean
-  house_rules: string; team_directory: string; defaults_version: number; stale_days: number
+  house_rules: string; team_directory: string; defaults_version: number; stale_days: number; follow_up_days: number
   lessons_in_context: number; brief_enabled: boolean; brief_time: string; brief_weekends: boolean
   last_brief_date: string | null; work_start: string; work_end: string; focus_minutes: number; use_ws_systems: boolean
 }
@@ -133,8 +139,9 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
     ...(facts ? { facts_from_ws_systems: facts } : {}),
     ...(followUp ? {
       this_is_a_follow_up: {
-        owner: followUp.owner, handover_sent: followUp.handover,
-        instruction: 'The work was delegated and has not come back. Draft a short, firm chaser to the owner (kind delegate, same owner, a new due date) and say what Tom should check.',
+        owner: followUp.owner, what_was_approved: (followUp.items || []).map((i: any) => ({ title: i.title, content: i.content, approved: i.approved })),
+        ...(followUp.type === 'email' ? { recipient: followUp.recipient, subject: followUp.subject } : { handover_sent: followUp.handover }),
+        instruction: FOLLOW_UP_INSTRUCTIONS[followUp.type as keyof typeof FOLLOW_UP_INSTRUCTIONS] || FOLLOW_UP_INSTRUCTIONS.delegate,
       },
     } : {}),
   }

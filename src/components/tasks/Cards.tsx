@@ -67,7 +67,14 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
   )
 }
 
-export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: () => void; showTask?: boolean }) {
+type ItemProps = { a: Action; onDone: () => void; showTask?: boolean }
+
+/** A draft to approve, or once approved, the thing to carry out. */
+export function ActionItem(props: ItemProps) {
+  return props.a.status === 'approved' ? <ToDoItem {...props} /> : <DraftItem {...props} />
+}
+
+function DraftItem({ a, onDone, showTask = true }: ItemProps) {
   const [editing, setEditing] = useState(false)
   const [content, setContent] = useState(a.content)
   const [rejecting, setRejecting] = useState(false)
@@ -143,11 +150,11 @@ export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: 
             </>
           ) : (
             <>
-              <button className="btn primary" disabled={busy} onClick={() => run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: {} }), a.kind === 'delegate' ? 'Approved. Copy the handover and send it.' : 'Approved.')}>
+              <button className="btn primary" disabled={busy} onClick={() => run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: {} }), TO_DO_WORDS[a.kind] ? `Approved. It is in To do: ${TO_DO_WORDS[a.kind].next}.` : 'Approved. Nothing more to do.')}>
                 {a.kind === 'delegate' ? 'Approve handover' : 'Approve'}
               </button>
               {canOutlook && (
-                <button className="btn" disabled={busy} onClick={() => run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: { create_outlook_draft: true } }), 'Approved. The draft is in your Outlook drafts, not sent.')}>
+                <button className="btn" disabled={busy} onClick={() => run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: { create_outlook_draft: true } }), 'Approved. The draft is in your Outlook drafts, not sent. It is in To do until you mark it sent.')}>
                   Approve and put in Outlook drafts
                 </button>
               )}
@@ -157,12 +164,6 @@ export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: 
               <button className="btn danger" onClick={() => setRejecting(!rejecting)}>Send back</button>
             </>
           )}
-        </div>
-      )}
-      {a.status === 'approved' && (
-        <div className="toolbar">
-          <button className="btn" onClick={copy}>Copy</button>
-          <button className="btn" disabled={busy} onClick={() => run(() => api(`/actions/${a.id}/done`, { method: 'POST' }), 'Marked done.')}>Mark done</button>
         </div>
       )}
       {rejecting && (
@@ -180,12 +181,99 @@ export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: 
   )
 }
 
+/** What Tom does with each kind once approved, and what the buttons say. */
+const TO_DO_WORDS: Record<string, { next: string; how: (d: Record<string, any>) => string; done: string; noCheck?: string }> = {
+  email_draft: { next: 'send it, then mark it sent',
+    how: (d) => d.outlook_draft_id ? 'It is in your Outlook drafts. Send it from Outlook, then mark it sent.' : 'Send it: open it in your email or copy it, then mark it sent.',
+    done: 'Sent, check for a reply', noCheck: 'Sent, no check needed' },
+  call: { next: 'book or make the call, then mark it done', how: () => 'Book or make the call, then mark it done.', done: 'Done, check it happened', noCheck: 'Done, no check needed' },
+  delegate: { next: 'send the handover, then mark it sent',
+    how: (d) => `Send the handover${d.owner ? ` to ${d.owner}` : ''}, then mark it sent. Aimelia checks it came back${d.due ? ` by ${fmtDate(d.due)}` : ' in a week'}.`,
+    done: 'Sent, check it comes back', noCheck: 'Sent, no check needed' },
+  document: { next: 'use it, then mark it done', how: () => 'Use it: copy it into Word or send it on, then mark it done.', done: 'Done' },
+  checklist: { next: 'work through it, then mark it done', how: () => 'Work through it, ticking each step, then mark it done.', done: 'Done' },
+}
+
+const STEP = /^\s*(?:[-*•]|\d+[.)]|\[[ x]?\])\s+/i
+const mailto = (d: Record<string, any>, body: string) =>
+  `mailto:${encodeURIComponent(String(d.to || '')).replace(/%40/g, '@').replace(/%2C/g, ',')}?${[d.cc && `cc=${encodeURIComponent(d.cc)}`,
+    `subject=${encodeURIComponent(d.subject || '')}`, `body=${encodeURIComponent(body.slice(0, 1800))}`].filter(Boolean).join('&')}`
+
+/** An approved action waiting for Tom to carry it out. */
+function ToDoItem({ a, onDone, showTask = true }: ItemProps) {
+  const w = TO_DO_WORDS[a.kind] || { next: 'carry it out', how: () => 'Carry it out, then mark it done.', done: 'Done' }
+  const d = a.details || {}
+  const lines = a.kind === 'checklist' ? a.content.split('\n').filter((l) => l.trim()) : []
+  const [ticked, setTicked] = useState<number[]>(Array.isArray(d.ticked) ? d.ticked : [])
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<Msg>(null)
+  const allTicked = lines.length > 0 && lines.every((l, i) => !STEP.test(l) || ticked.includes(i))
+
+  const done = async (followUp: boolean) => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await api(`/actions/${a.id}/done`, { method: 'POST', body: { follow_up: followUp } })
+      setMsg({ ok: true, text: r.follow_up_on ? `Done. Aimelia checks on ${fmtDate(r.follow_up_on)}; it will be in Follow-ups.` : 'Done.' })
+      setTimeout(onDone, 1100)
+    } catch (e: any) { setMsg({ ok: false, text: e.message }) } finally { setBusy(false) }
+  }
+  const tick = async (i: number) => {
+    const next = ticked.includes(i) ? ticked.filter((x) => x !== i) : [...ticked, i]
+    setTicked(next)
+    try { await api(`/actions/${a.id}`, { method: 'PATCH', body: { details: { ...d, ticked: next } } }) } catch (e: any) { setMsg({ ok: false, text: e.message }) }
+  }
+  const copy = async () => {
+    const head = a.kind === 'email_draft' ? [d.to && `To: ${d.to}`, d.cc && `Cc: ${d.cc}`, d.subject && `Subject: ${d.subject}`].filter(Boolean).join('\n') : ''
+    try { await navigator.clipboard.writeText([head, a.content].filter(Boolean).join('\n\n')); setMsg({ ok: true, text: 'Copied to the clipboard.' }) }
+    catch { setMsg({ ok: false, text: 'The browser would not copy. Select the text and copy it.' }) }
+  }
+
+  return (
+    <div className="item todo">
+      <div className="o">
+        {showTask && <span className="tag">{a.task_title}</span>}
+        <span className="tag">{KIND_LABEL[a.kind] || a.kind}</span>
+        {a.approved_at && <span>Approved {fmtDate(a.approved_at)}</span>}
+      </div>
+      <div className="t">{a.title}</div>
+      <div className="meta todo-how">{w.how(d)}</div>
+      {a.kind === 'email_draft' && (d.to || d.subject) && (
+        <div className="meta">{d.to && <>To <b>{d.to}</b>{d.cc ? <>, cc <b>{d.cc}</b></> : null}. </>}{d.subject && <>Subject <b>{d.subject}</b></>}</div>
+      )}
+      {lines.length > 0 ? (
+        <ul className="todo-steps">
+          {lines.map((l, i) => STEP.test(l)
+            ? <li key={i}><label className="chk"><input type="checkbox" checked={ticked.includes(i)} onChange={() => tick(i)} /><span className={ticked.includes(i) ? 'struck' : ''}>{l.replace(STEP, '')}</span></label></li>
+            : <li key={i} className="plain">{l}</li>)}
+        </ul>
+      ) : <div className="content">{a.content}</div>}
+      <div className="toolbar">
+        {a.kind === 'email_draft' && d.to && !d.outlook_draft_id && <a className="btn" href={mailto(d, a.content)}>Open in email</a>}
+        <button className="btn" onClick={copy}>Copy</button>
+        <button className={`btn ${lines.length && !allTicked ? '' : 'primary'}`} disabled={busy} onClick={() => done(true)}>{w.done}</button>
+        {w.noCheck && <button className="btn" disabled={busy} onClick={() => done(false)}>{w.noCheck}</button>}
+      </div>
+      <MsgLine msg={msg} />
+    </div>
+  )
+}
+
+const FOLLOW_UP_WORDS = {
+  delegate: { tag: (o: string) => `Handed to ${o}`, ask: 'Has it come back, and is it right?', done: 'Delivered, close it', closed: 'Closed. The original task is closed too.',
+    chase: 'Not yet, draft a chaser', show: 'the handover that was sent' },
+  email: { tag: (o: string) => `Emailed ${o}`, ask: 'Have they replied, and is it settled?', done: 'Settled, close it', closed: 'Closed. The original task is closed too.',
+    chase: 'No reply, draft a chaser', show: 'the email you approved' },
+  call: { tag: (o: string) => `Call with ${o}`, ask: 'Did the call happen, and is everything from it on the list?', done: 'Done, close it', closed: 'Closed. The original task is closed too.',
+    chase: 'Not yet, draft a nudge', show: 'the call you approved' },
+}
+
 export function FollowUpItem({ t, onDone }: { t: Task; onDone: () => void }) {
+  const w = FOLLOW_UP_WORDS[t.follow_up_type || 'delegate'] || FOLLOW_UP_WORDS.delegate
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<Msg>(null)
   const [show, setShow] = useState(false)
 
-  const go = async (outcome: 'delivered' | 'chase' | 'snooze', ok: string) => {
+  const go = async (outcome: 'delivered' | 'chase' | 'snooze' | 'now', ok: string) => {
     setBusy(true)
     setMsg(null)
     try {
@@ -201,18 +289,18 @@ export function FollowUpItem({ t, onDone }: { t: Task; onDone: () => void }) {
 
   return (
     <div className="item">
-      <div className="o"><span className="tag">Handed to {t.follow_up_owner || 'the owner'}</span><span>Due back {fmtDate(t.due_date)}</span></div>
+      <div className="o"><span className="tag">{w.tag(t.follow_up_owner || 'the owner')}</span><span>Due back {fmtDate(t.due_date)}</span></div>
       <div className="t">{t.title}</div>
-      <div className="meta">Has it come back, and is it right?</div>
+      <div className="meta">{w.ask}</div>
       {t.handover && (
         <>
-          <button className="linkbtn" style={{ marginTop: 6 }} onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} the handover that was sent</button>
-          {show && <div className="content">{t.handover}</div>}
+          <button className="linkbtn" style={{ marginTop: 6 }} onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} {w.show}</button>
+          {show && <div className="content">{t.notes || t.handover}</div>}
         </>
       )}
       <div className="toolbar">
-        <button className="btn primary" disabled={busy} onClick={() => go('delivered', 'Closed. The original task is closed too.')}>Delivered, close it</button>
-        <button className="btn" disabled={busy} onClick={() => go('chase', 'The team is drafting a chaser for you to approve.')}>Not yet, draft a chaser</button>
+        <button className="btn primary" disabled={busy} onClick={() => go('delivered', w.closed)}>{w.done}</button>
+        <button className="btn" disabled={busy} onClick={() => go('chase', 'The team is drafting a chaser for you to approve.')}>{w.chase}</button>
         <button className="btn" disabled={busy} onClick={() => go('snooze', 'Checking again in a week.')}>Give it another week</button>
       </div>
       <MsgLine msg={msg} />
