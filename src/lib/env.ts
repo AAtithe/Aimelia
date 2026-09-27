@@ -34,6 +34,8 @@ export const env = {
   teamsWebhook: setting('TEAMS_WEBHOOK_URL', 'teams_webhook_url'),
   ntfyUrl: setting('NTFY_URL', 'ntfy_url'),
   ntfyToken: setting('NTFY_TOKEN', 'ntfy_token'),
+  // Meeting notes for the task import
+  firefliesKey: setting('FIREFLIES_API_KEY', 'fireflies_api_key'),
   // Read-only lookups
   wscip: () => ({ base: read('WSCIP_BASE_URL') || 'https://operations.williamsstanley.co', email: read('WSCIP_EMAIL') ?? stored('wscip_email'),
     password: read('WSCIP_PASSWORD') ?? stored('wscip_password'), token: read('WSCIP_TOKEN') }),

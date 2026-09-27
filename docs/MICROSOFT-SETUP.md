@@ -23,6 +23,7 @@ calendar events. It never sends mail and never edits existing events.
    - `User.Read`
    - `Mail.ReadWrite`
    - `Calendars.ReadWrite`
+   - `Tasks.Read` (Microsoft To Do, for Import tasks; read only)
    - `offline_access`
 
    Remove `Mail.Send` if it is listed. Grant admin consent if the tenant requires it.
@@ -48,6 +49,8 @@ The redirect address to register is shown on the same card. It must match the si
    his Aimelia login and accepts the permissions. Any other account is refused.
 2. Email triage: "Check for new mail". Calendar and briefs: the week appears in London time.
 3. Automation: triage runs hourly and meeting briefs at 06:00 and 18:00 London from then on.
+4. Import tasks, Microsoft To Do: your lists appear. If it says To Do access is missing, the connection was made before
+   `Tasks.Read` was added: add the permission to the app registration, then **Connect again** and accept it.
 
 ## How it is built (for review)
 

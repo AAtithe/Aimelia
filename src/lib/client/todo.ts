@@ -63,6 +63,7 @@ export interface Task {
   follow_up_owner: string | null
   calendar_event: { id: string; start: string; end: string; link?: string } | null
   stale_nudged_at: string | null
+  source?: string | null
   handover?: string
   questions?: Question[]
   actions?: Action[]

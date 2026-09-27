@@ -15,6 +15,7 @@ export const SCOPES = [
   'https://graph.microsoft.com/User.Read',
   'https://graph.microsoft.com/Mail.ReadWrite',
   'https://graph.microsoft.com/Calendars.ReadWrite',
+  'https://graph.microsoft.com/Tasks.Read', // Microsoft To Do, for the task import; read only
 ]
 export const STATE_COOKIE = 'aimelia_oauth'
 export const STATE_TTL = 600

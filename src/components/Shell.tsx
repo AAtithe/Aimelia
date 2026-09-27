@@ -14,6 +14,7 @@ const GROUPS: [string, Nav[]][] = [
   ['My work', [
     { href: '/today', label: 'Today', count: (b) => b.questions.length + b.actions.length + b.follow_ups.length },
     { href: '/tasks', label: 'All tasks' },
+    { href: '/import', label: 'Import tasks' },
     { href: '/routines', label: 'Routines' },
   ]],
   // Hidden while Microsoft 365 is paused (not set up yet).

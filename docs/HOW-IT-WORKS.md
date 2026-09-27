@@ -20,6 +20,26 @@ the task, approving Drop closes it. Routines create recurring work ahead of time
 through Triage; Tom's edits and send-backs become lessons every agent sees. Facts can come from WSCIP and Payroll Command
 Center through a fixed list of read-only lookups.
 
+## Importing tasks
+
+Import tasks (`/import`, `src/lib/agents/imports.ts`, `src/lib/agents/importText.ts`) brings work in from elsewhere.
+Everything imported is queued for Triage like any other task, and each task's notes say where it came from.
+
+| Source | How |
+|---|---|
+| Microsoft To Do | Read through Graph (`Tasks.Read`) once Microsoft 365 is connected. Open tasks in the ticked lists, with due date, importance, notes and open steps. Nothing in To Do is changed. Running it again brings only new tasks. |
+| Outlook tasks CSV | Outlook's Export to a file. Subject, Due Date (UK order), Priority and Notes are used; completed rows are skipped. The route to use before Microsoft 365 is connected. |
+| Word (.docx), .txt, .md | Read by the AI, which keeps only the actions: agreed, asked for, or plainly next. Discussion and background are left out. |
+| Meeting notes, transcripts (.vtt, .srt) | As documents. The owner named for each action is kept in the notes (`Owner named: Mandy`) so Triage can delegate it, using the team directory. |
+| Fireflies | With the API key from Settings, recent meetings are listed; importing one reads its action items and overview. Read only. |
+| A pasted list | One task per line, as written; no AI. |
+
+Without an AI key, or if the AI fails, documents and notes fall back to their bullets, numbered items and `Action:` lines,
+so an import is never lost. Each import is recorded by source and a fingerprint of its text (or the To Do or Fireflies
+id); the record is claimed before tasks are written, so the same thing is never imported twice by accident. Importing it
+again is refused with the date it came in, unless confirmed. Old binary `.doc` files and PDFs are refused with what to do
+instead. Files are limited to 3 MB, Vercel's request limit after encoding.
+
 ## Email and meetings
 
 - Triage: keyword rules (whole words), then AI. Results are stored; screens read from the database.

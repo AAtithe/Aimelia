@@ -1,6 +1,7 @@
 # Aimelia
 
-Tom Stanley's assistant for Williams, Stanley & Co: a to-do list worked by a team of AI agents, plus email triage,
+Tom Stanley's assistant for Williams, Stanley & Co: a to-do list worked by a team of AI agents (with tasks imported from Microsoft To Do, Word documents,
+meeting notes and Fireflies), plus email triage,
 reply drafting, meeting briefs and prep, a knowledge base and a morning push. One Next.js app on Vercel with Neon Postgres,
 in the firm's house style.
 
