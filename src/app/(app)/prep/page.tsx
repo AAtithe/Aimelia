@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { mail } from '@/lib/client/todo'
-import { Shell } from '@/components/Shell'
-import { BriefText, MsgLine, NotConnected, useLoad, type Msg } from '@/components/mail/common'
+import { Shell, useShell } from '@/components/Shell'
+import { BriefText, MsgLine, NotConnected, useLoad, type Msg, MicrosoftPaused } from '@/components/mail/common'
 
 export default function MeetingPrep() {
   const guide = useLoad(() => mail('/prep/guidelines'))
@@ -28,6 +28,9 @@ export default function MeetingPrep() {
   }
 
   const sections = (guide.data as any)?.brief_sections || {}
+  const paused = useShell().microsoft?.configured === false
+  if (paused) return <Shell title="Meeting prep" sub="Paused until Microsoft 365 is set up."><MicrosoftPaused /></Shell>
+
   return (
     <Shell title="Meeting prep" sub="Prep you like a star: six sections, under 400 words, from the invite and recent emails with the people in it. Runs by itself at 06:00 and 18:00.">
       <NotConnected error={err} />

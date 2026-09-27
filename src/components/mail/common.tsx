@@ -65,6 +65,18 @@ export function download(name: string, text: string) {
 }
 
 export function NotConnected({ error }: { error: string }) {
+  if (/paused/i.test(error)) return <MicrosoftPaused />
   if (!/Microsoft 365/.test(error)) return error ? <div className="note bad">{error}</div> : null
   return <div className="note warn"><b>Microsoft 365 is not connected.</b> Connect it in <a href="/settings">Settings</a> to read mail and your calendar.</div>
+}
+
+/** Shown on email and calendar pages while Microsoft 365 has not been set up. */
+export function MicrosoftPaused() {
+  return (
+    <div className="note info">
+      <b>Paused until Microsoft 365 is set up.</b> Email triage, calendar briefs, reply drafts and meeting prep need Aimelia connected to your
+      mailbox and calendar. A developer is setting that up; the handover notes are in docs/MICROSOFT-SETUP.md. Everything else works now:
+      give the team your list on <a href="/today">Today</a>.
+    </div>
+  )
 }

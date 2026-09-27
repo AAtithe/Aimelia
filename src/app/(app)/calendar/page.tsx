@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { mail } from '@/lib/client/todo'
-import { Shell } from '@/components/Shell'
-import { BriefText, download, londonTime, minutesUntil, MsgLine, NotConnected, useLoad, type Msg } from '@/components/mail/common'
+import { Shell, useShell } from '@/components/Shell'
+import { BriefText, download, londonTime, minutesUntil, MsgLine, NotConnected, useLoad, type Msg, MicrosoftPaused } from '@/components/mail/common'
 
 type Row = { event: any; brief: string | null; style?: string; generated_at?: string; recent_comms_count?: number; word_count?: number }
 
@@ -26,6 +26,9 @@ export default function CalendarBriefs() {
   }
 
   const rows = data?.briefs || []
+  const paused = useShell().microsoft?.configured === false
+  if (paused) return <Shell title="Calendar and briefs" sub="Paused until Microsoft 365 is set up."><MicrosoftPaused /></Shell>
+
   return (
     <Shell title="Calendar and briefs" sub="The next seven days, in London time, with a brief for each meeting. Briefs are kept here; your calendar is never changed."
       actions={<><button className="btn ghost" onClick={load}>Refresh</button><button className="btn ghost" disabled={!!busy} onClick={prepareAll}>{busy === 'all' ? 'Preparing ...' : 'Prepare the next 24 hours'}</button></>}>

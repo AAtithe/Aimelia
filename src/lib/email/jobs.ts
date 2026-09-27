@@ -6,7 +6,7 @@
  */
 import { iso, json, one, q } from '../db'
 import { londonParts } from '../dates'
-import { accessToken } from '../microsoft'
+import { accessToken, microsoftConfigured } from '../microsoft'
 import { registerTickStep } from '../tick'
 import { runTriage, getMessage, addressOf } from './mail'
 import { prepareUpcoming } from './briefs'
@@ -68,6 +68,7 @@ export function dueSlot(id: JobId, now: Date = new Date()): string | null {
 }
 
 export async function runDueJobs(now: Date = new Date()) {
+  if (!microsoftConfigured()) return 'Microsoft 365 paused'
   if (!(await accessToken())) return 'Microsoft 365 not connected'
   await ensureJobs()
   const out: Record<string, unknown> = {}

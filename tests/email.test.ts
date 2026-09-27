@@ -208,3 +208,21 @@ describe('automation', () => {
     expect(Math.round(a.totals.ai_confidence * 10)).toBe(7)
   })
 })
+
+describe('Microsoft 365 paused', () => {
+  it('reports paused, refuses Graph calls clearly, and skips the email jobs', async () => {
+    delete process.env.MS_TENANT_ID
+    delete process.env.MS_CLIENT_ID
+    delete process.env.MS_CLIENT_SECRET
+    const { connection } = await import('@/lib/microsoft')
+    expect(await connection()).toEqual({ configured: false, connected: false, account: null, expires_at: null })
+    const r = await req('POST', '/triage/run')
+    expect(r.status).toBe(503)
+    expect(r.data.detail).toContain('paused')
+    expect(await runDueJobs()).toBe('Microsoft 365 paused')
+    expect(hits).toHaveLength(0) // nothing went to Microsoft
+    // Everything that does not need Microsoft still works.
+    expect((await req('POST', '/knowledge', { title: 'Note', text: 'Tronc rules' })).status).toBe(201)
+    expect((await req('GET', '/analytics')).status).toBe(200)
+  })
+})

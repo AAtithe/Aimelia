@@ -104,10 +104,16 @@ export async function accessToken(): Promise<string | null> {
   }
 }
 
-export async function connection(): Promise<{ connected: boolean; account: string | null; expires_at: string | null }> {
+/** Microsoft 365 is paused until MS_TENANT_ID, MS_CLIENT_ID and MS_CLIENT_SECRET are all set. */
+export const microsoftConfigured = () => !!(env.msTenant() && env.msClientId() && env.msClientSecret())
+
+export const PAUSED_MESSAGE = 'Microsoft 365 is paused: it has not been set up yet. Email and calendar features switch on once a developer adds the Microsoft settings.'
+
+export async function connection(): Promise<{ configured: boolean; connected: boolean; account: string | null; expires_at: string | null }> {
+  if (!microsoftConfigured()) return { configured: false, connected: false, account: null, expires_at: null }
   const token = await accessToken()
   const row = await one<{ account: string; expires_at: string }>(`SELECT account, expires_at FROM ms_tokens WHERE owner = $1`, [OWNER])
-  return { connected: !!token, account: token ? row?.account || null : null, expires_at: token && row ? new Date(row.expires_at).toISOString() : null }
+  return { configured: true, connected: !!token, account: token ? row?.account || null : null, expires_at: token && row ? new Date(row.expires_at).toISOString() : null }
 }
 
 export async function disconnect() {
@@ -118,6 +124,7 @@ type GraphInit = { query?: Record<string, string | number | undefined>; body?: u
 
 /** Call Microsoft Graph as the owner. Throws GraphError(401) when not connected. */
 export async function graph<T = any>(method: string, path: string, init: GraphInit = {}): Promise<T> {
+  if (!microsoftConfigured()) throw new GraphError(503, PAUSED_MESSAGE)
   const token = await accessToken()
   if (!token) throw new GraphError(401, 'Aimelia is not connected to Microsoft 365. Connect it from Settings.')
   const qs = new URLSearchParams()

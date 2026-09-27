@@ -6,6 +6,11 @@ create themselves on first use.
 
 Allow about 30 minutes. Do the steps in order.
 
+**Starting without Microsoft 365.** Steps 1, 2, 4 and 5 are enough to start. Skip step 3 and leave the `MS_` settings
+out: Aimelia runs with the agent team, routines, knowledge base and morning push, and hides the email and calendar
+features until a developer follows [MICROSOFT-SETUP.md](MICROSOFT-SETUP.md). The minimum settings are
+`AIMELIA_ACCESS_KEY`, `ENCRYPTION_KEY`, `CRON_SECRET`, `APP_URL` and an AI key.
+
 ## 1. Vercel project
 
 1. In Vercel, open the existing **aimelia** project (or import `AAtithe/Aimelia`).
@@ -18,7 +23,7 @@ Allow about 30 minutes. Do the steps in order.
 1. In the project, Storage, Create Database, choose **Neon** (Postgres). Connect it to Production and Preview.
 2. That sets `DATABASE_URL` for you. Nothing else to do: tables are created on first request.
 
-## 3. Microsoft 365 app
+## 3. Microsoft 365 app (can wait: see MICROSOFT-SETUP.md)
 
 Rotate the old secret first: the previous one was committed to this public repository and must be treated as known.
 

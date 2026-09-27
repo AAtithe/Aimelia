@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useShell } from '@/components/Shell'
 import { api, Action, Question, Task, KIND_LABEL, STATUS_LABEL, STATUS_PILL, TaskStatus, fmtDate } from '@/lib/client/todo'
 
 export function StatusPill({ status }: { status: TaskStatus }) {
@@ -64,7 +65,8 @@ export function ActionItem({ a, onDone, showTask = true }: { a: Action; onDone: 
   const live = a.status === 'proposed'
   const flagged = a.review_status === 'flagged'
   const d = a.details || {}
-  const canOutlook = a.kind === 'email_draft' && !!d.to
+  // Only offered once Microsoft 365 is connected; until then, Copy puts the draft on the clipboard.
+  const canOutlook = a.kind === 'email_draft' && !!d.to && !!useShell().microsoft?.connected
 
   const run = async (fn: () => Promise<any>, ok: string, refresh = true) => {
     setBusy(true)

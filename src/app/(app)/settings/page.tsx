@@ -37,14 +37,18 @@ export default function Settings() {
   }
 
   const s: any = setup.data
-  const Row = ({ ok, label, fix }: { ok: boolean; label: string; fix: string }) => (
-    <tr><td className="nowrap"><span className={`pill ${ok ? 'Done' : 'Atrisk'}`}>{ok ? 'Set' : 'Missing'}</span></td><td>{label}</td><td className="cap" style={{ margin: 0 }}>{ok ? '' : fix}</td></tr>
+  const Row = ({ ok, label, fix, paused }: { ok: boolean; label: string; fix: string; paused?: boolean }) => (
+    <tr><td className="nowrap"><span className={`pill ${ok ? 'Done' : paused ? 'Parked' : 'Atrisk'}`}>{ok ? 'Set' : paused ? 'Paused' : 'Missing'}</span></td><td>{label}</td><td className="cap" style={{ margin: 0 }}>{ok ? '' : fix}</td></tr>
   )
+  const msPaused = !!s && !s.microsoft_app
 
   return (
     <Shell title="Settings" sub="The Microsoft 365 connection and what is configured on the server. Secret values are never shown here.">
       <div className="card"><h2>Microsoft 365</h2><div className="body">
-        {!s ? <p className="cap">Reading ...</p> : s.microsoft_connected ? (
+        {!s ? <p className="cap">Reading ...</p> : msPaused ? (
+          <><p><b>Paused.</b> Microsoft 365 has not been set up yet, so email, calendar, reply drafts and meeting prep are hidden. Agent tasks, routines, the knowledge base and the morning push all work without it.</p>
+            <p className="cap">For the developer: follow docs/MICROSOFT-SETUP.md in the repository. When the three MS_ settings are in Vercel and the site is redeployed, a Connect button appears here.</p></>
+        ) : s.microsoft_connected ? (
           <><p>Connected as <b>{s.microsoft_account}</b>. Aimelia can read your mail and calendar and write drafts and calendar events. It cannot send email.</p>
             <div className="toolbar"><a className="btn" href="/api/auth/login">Connect again</a><button className="btn danger" onClick={disconnect}>Disconnect</button></div></>
         ) : (
@@ -58,9 +62,9 @@ export default function Settings() {
           <div className="tblwrap"><table><tbody>
             <Row ok={s.access_key} label="Access key (AIMELIA_ACCESS_KEY)" fix="Required. Set a long random string in Vercel." />
             <Row ok={s.encryption_key} label="Encryption key (ENCRYPTION_KEY)" fix="Required. At least 32 random characters." />
-            <Row ok={s.owner_email} label="Owner account (AIMELIA_OWNER_EMAIL)" fix="Required to connect Microsoft 365." />
+            <Row ok={s.owner_email} paused={msPaused} label="Owner account (AIMELIA_OWNER_EMAIL)" fix="Needed when Microsoft 365 is set up." />
             <Row ok={s.cron_secret} label="Background timer (CRON_SECRET)" fix="Required for the agents and email jobs to run by themselves." />
-            <Row ok={s.microsoft_app} label="Microsoft app (MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET)" fix={`Register the app; its redirect URI is ${s.redirect_uri}`} />
+            <Row ok={s.microsoft_app} paused label="Microsoft app (MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET)" fix={`Being set up by a developer (docs/MICROSOFT-SETUP.md). Redirect URI: ${s.redirect_uri}`} />
             <Row ok={s.ai.anthropic || s.ai.openai} label="AI model (ANTHROPIC_API_KEY or OPENAI_API_KEY)" fix="Without one, answers are placeholders." />
             <Row ok={s.channels.teams || s.channels.phone} label="Morning push (TEAMS_WEBHOOK_URL or NTFY_URL)" fix="Optional." />
             <Row ok={s.sources.wscip} label="WSCIP lookups (WSCIP_EMAIL, WSCIP_PASSWORD)" fix="Optional. A read-only user in WSCIP." />

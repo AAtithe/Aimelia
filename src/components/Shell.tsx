@@ -16,6 +16,7 @@ const GROUPS: [string, Nav[]][] = [
     { href: '/tasks', label: 'All tasks' },
     { href: '/routines', label: 'Routines' },
   ]],
+  // Hidden while Microsoft 365 is paused (not set up yet).
   ['Email and meetings', [
     { href: '/email', label: 'Email triage' },
     { href: '/calendar', label: 'Calendar and briefs' },
@@ -35,7 +36,8 @@ const GROUPS: [string, Nav[]][] = [
   ]],
 ]
 
-type Ctx = { brief: Briefing | null; refreshBrief: () => void; microsoft: { connected: boolean; account: string | null } | null }
+type Microsoft = { configured: boolean; connected: boolean; account: string | null }
+type Ctx = { brief: Briefing | null; refreshBrief: () => void; microsoft: Microsoft | null }
 const ShellContext = createContext<Ctx>({ brief: null, refreshBrief: () => {}, microsoft: null })
 export const useShell = () => useContext(ShellContext)
 
@@ -71,7 +73,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
   const refreshBrief = useCallback(() => {
     api<Briefing>('/briefing').then(setBrief).catch(() => {})
-    raw('/auth/status').then(setMicrosoft).catch(() => setMicrosoft({ connected: false, account: null }))
+    raw('/auth/status').then(setMicrosoft).catch(() => setMicrosoft({ configured: false, connected: false, account: null }))
   }, [])
 
   useEffect(() => { check() }, [check])
@@ -110,7 +112,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         <ShellContext.Provider value={{ brief, refreshBrief, microsoft }}>
           <div className="app">
             <nav className={`sidenav ${menu ? 'open' : ''}`} aria-label="Sections">
-              {GROUPS.map(([group, items]) => (
+              {GROUPS.filter(([group]) => group !== 'Email and meetings' || microsoft?.configured !== false).map(([group, items]) => (
                 <div key={group}>
                   <div className="grp">{group}</div>
                   {items.map((n) => {
@@ -125,7 +127,8 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
               ))}
               <div className="connect">
                 <span className={`dot ${microsoft?.connected ? 'on' : ''}`} />
-                {microsoft === null ? 'Checking Microsoft 365 ...' : microsoft.connected ? `Microsoft 365: ${microsoft.account}` : <Link href="/settings" style={{ padding: 0, border: 0 }}>Microsoft 365 not connected</Link>}
+                {microsoft === null ? 'Checking Microsoft 365 ...' : !microsoft.configured ? <Link href="/settings" style={{ padding: 0, border: 0 }}>Microsoft 365 paused</Link>
+                  : microsoft.connected ? `Microsoft 365: ${microsoft.account}` : <Link href="/settings" style={{ padding: 0, border: 0 }}>Microsoft 365 not connected</Link>}
               </div>
             </nav>
             <main className="content">{children}</main>
