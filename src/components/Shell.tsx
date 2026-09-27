@@ -27,6 +27,7 @@ const GROUPS: [string, Nav[]][] = [
     { href: '/prep', label: 'Meeting prep' },
   ]],
   ['Knowledge', [
+    { href: '/memory', label: 'What Aimelia knows', count: (b) => b.memory_questions ?? 0 },
     { href: '/knowledge', label: 'Knowledge base' },
     { href: '/workbench', label: 'AI workbench' },
   ]],

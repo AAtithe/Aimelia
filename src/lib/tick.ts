@@ -3,6 +3,7 @@ import { getPipeline, processQueue, releaseStale, seedDefaults } from './agents/
 import { createDueRoutines, nudgeStale, wakeScheduled } from './agents/schedule'
 import { maybeSendMorning } from './agents/notify'
 import { runImportJobs } from './agents/imports'
+import { learnFromNotes, weeklyCheck, weeklyCheckDue } from './memory/learn'
 
 type Step = [name: string, run: () => Promise<unknown>]
 let extraSteps: Step[] = []
@@ -23,6 +24,9 @@ export async function tick(now: Date = new Date()) {
   // Imports cut off mid-read (or queued when the run after the request did not start) finish here.
   const started = Date.now()
   await safe('imports', async () => (await runImportJobs({ limit: 1 })).finished)
+  // What Tom wrote since the last tick is learned from; on Sunday evening the weekly check runs, when there is time for it.
+  await safe('memory_notes', () => learnFromNotes({ startWithinMs: 20_000, limit: 10 }))
+  if (Date.now() - started < 40_000 && (await weeklyCheckDue(now))) await safe('memory_check', async () => (await weeklyCheck('weekly', now))?.status)
   const pipeline = await getPipeline()
   await safe('stale', () => nudgeStale(pipeline.stale_days, now))
   // A long read above leaves less of the five minutes for the agents.

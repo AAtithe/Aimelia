@@ -9,7 +9,7 @@
  * Tom can attach photos, PDFs and documents to a message (see files.ts). Photos and PDFs go to the model
  * as they are, for the last few messages only; documents go as their text.
  *
- * Every tool reads, except create_task, answer_question and add_to_knowledge, which do exactly what the
+ * Every tool reads, except create_task, answer_question, add_to_knowledge and remember, which do exactly what the
  * matching buttons do. Nothing is ever sent: email stays as drafts made elsewhere, and the calendar is only read.
  */
 import { iso, one, q } from '../db'
@@ -23,6 +23,7 @@ import { resumeIfAnswered } from '../agents/api'
 import { getPipeline, logEvent, processQueue, seedDefaults } from '../agents/orchestrator'
 import { touch } from '../agents/schedule'
 import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources'
+import { addMemory, keepNote, memoryForContext } from '../memory/store'
 
 export const MAX_STEPS = 6
 const MAX_CALLS = 4
@@ -108,8 +109,23 @@ export const TOOLS: Record<string, Tool> = {
       await q(`UPDATE questions SET answer = $2, status = 'answered', answered_at = now() WHERE id = $1`, [qn.id, answer])
       await touch(qn.task_id)
       await logEvent(qn.task_id, 'answer', 'tom', { question: qn.question, answer, via: 'chat' })
+      await keepNote('answer', answer, { question: qn.question, via: 'chat' }, `question:${qn.id}`)
       const resumed = await resumeIfAnswered(qn.task_id, 'questions answered')
       return { answered: true, task_back_with_agents: resumed }
+    },
+  },
+  search_memory: {
+    about: 'What Aimelia knows from what Tom has told it before: facts about clients, people and the firm, and how Tom likes things done. Check it before answering about any of those',
+    args: '{"query": "words to search for"}',
+    run: async (a) => memoryForContext(String(a.query || ''), 12),
+  },
+  remember: {
+    about: 'Keep a fact or preference in Aimelia\'s memory, as Tom states it. Only when Tom asks you to remember or correct something. It shows on What Aimelia knows, where he can change it',
+    args: '{"subject": "who or what it is about", "content": "one plain statement", "kind": "fact|preference|person|client|process"}',
+    run: async (a) => {
+      const m = await addMemory({ kind: a.kind, subject: String(a.subject || ''), content: String(a.content || ''),
+        sources: [{ source: 'chat', label: 'You told Ask Aimelia', quote: String(a.content || '').slice(0, 300), at: new Date().toISOString() }] }, 'tom', 'Added from Ask Aimelia')
+      return m ? { remembered: true, subject: m.subject, content: m.content } : 'Not kept: it needs the statement to remember.'
     },
   },
   search_knowledge: {
@@ -195,7 +211,9 @@ Respond with a single JSON object and nothing else, one of:
 How to work:
 - Use the tools for any fact about Tom's tasks, email, diary, knowledge base or clients. Never guess or invent one.
 - If a tool says something is unavailable or not connected, say so plainly rather than working around it.
-- create_task, answer_question and add_to_knowledge change things: use them only when Tom asks, then confirm what you did.
+- create_task, answer_question, add_to_knowledge and remember change things: use them only when Tom asks, then confirm what you did.
+- Before answering about a client, a person, a date or how Tom likes something done, check search_memory. If what Tom says
+  now contradicts a memory, point it out and offer to correct it with remember.
 - Tom may attach photos, PDFs or documents: receipts, invoices, letters from HMRC, whiteboards, screenshots, management accounts.
   Read them yourself. Say what matters in them, quote figures exactly, and say plainly if something is unreadable.
   Offer to turn the actions in them into tasks, or to file them in the knowledge base.

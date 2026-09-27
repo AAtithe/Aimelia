@@ -18,6 +18,8 @@ import { deferTask, firstDue, scheduleFollowUp, touch, type Cadence } from './sc
 import { csvItems, fingerprint, jobState, queueImport, recentJobs, runImportJobs, type JobKind, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
 import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
+import { keepNote } from '../memory/store'
+import { memoryEndpoints } from '../memory/api'
 
 // ---------------------------------------------------------------- schemas
 
@@ -196,6 +198,7 @@ export const todoEndpoints: Endpoint[] = [
       q(`${TASK_SELECT} WHERE t.status = 'due' ORDER BY t.due_date`),
       q(`SELECT status, count(*)::int AS n FROM tasks GROUP BY status`),
     ])
+    const memoryQuestions = (await one(`SELECT count(*)::int AS n FROM memory_questions WHERE status = 'open'`))?.n ?? 0
     const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
     for (const r of counts) c[r.status] = r.n
     return {
@@ -203,7 +206,7 @@ export const todoEndpoints: Endpoint[] = [
       questions: questions.map((x) => ({ ...questionOut(x), task_title: x.task_title })),
       actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_review_flag: a.task_review_flag })),
       failed: failed.map(taskOut), follow_ups: followUps.map((t) => ({ ...taskOut(t), handover: t.follow_up?.handover ?? null })),
-      providers: availableProviders(), channels: channels(), sources: configuredSources(),
+      providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
     }
   }],
 
@@ -220,12 +223,14 @@ export const todoEndpoints: Endpoint[] = [
     await seedDefaults()
     const t = (await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, $3, $4, now()) RETURNING id`,
       [b.title, b.notes, b.priority, b.due_date ?? null]))!
+    if (b.notes.trim()) await keepNote('task_brief', `${b.title}\n\n${b.notes}`, { task: b.title }, `task:${t.id}`)
     if (b.run_now) kickQueue()
     return Response.json(await fullTask(t.id), { status: 201 })
   }],
   ['POST', '/capture', async (req) => {
     const b = await body(req, Capture)
     await seedDefaults()
+    await keepNote('brain_dump', b.text, {}, `dump:${fingerprint(b.text)}`)
     const items = await splitCapture(b.text)
     if (!items.length) fail(422, 'No tasks found in that text.')
     const made = []
@@ -314,6 +319,7 @@ export const todoEndpoints: Endpoint[] = [
     const t = await getTask(p.id)
     await logEvent(p.id, 'feedback', 'tom', { text: b.text })
     await recordLesson('feedback', { taskTitle: t.title, note: b.text })
+    await keepNote('feedback', b.text, { task: t.title })
     await requeue(p.id, 'feedback')
     return fullTask(p.id)
   }],
@@ -366,6 +372,7 @@ export const todoEndpoints: Endpoint[] = [
     const qn = (await one(`UPDATE questions SET answer = $2, status = 'answered', answered_at = now() WHERE id = $1 RETURNING *`, [p.id, b.answer])) || fail(404, 'Question not found.')
     await touch(qn!.task_id)
     await logEvent(qn!.task_id, 'answer', 'tom', { question: qn!.question, answer: b.answer })
+    await keepNote('answer', b.answer, { question: qn!.question, task: (await one(`SELECT title FROM tasks WHERE id = $1`, [qn!.task_id]))?.title }, `question:${qn!.id}`)
     return { question: questionOut(qn!), task_resumed: await resumeIfAnswered(qn!.task_id, 'questions answered') }
   }],
   ['POST', '/questions/:id/dismiss', async (_r, p) => {
@@ -432,6 +439,7 @@ export const todoEndpoints: Endpoint[] = [
     const task = await getTask(a!.task_id)
     await touch(task.id)
     if (b.reason) await recordLesson('rejection', { taskTitle: task.title, actionKind: a!.kind, before: a!.content, note: b.reason })
+    if (b.reason) await keepNote('send_back', b.reason, { task: task.title, draft: a!.title })
     await logEvent(task.id, 'feedback', 'tom', { text: `Rejected '${a!.title}'. ${b.reason}`.trim(), action_id: a!.id })
     if (b.rework) await requeue(task.id, 'action rejected')
     else await closeIfSettled(task.id)
@@ -523,6 +531,7 @@ export const todoEndpoints: Endpoint[] = [
     }
     return out
   }],
+  ...memoryEndpoints,
 ]
 
 export async function resumeIfAnswered(taskId: string, reason: string): Promise<boolean> {

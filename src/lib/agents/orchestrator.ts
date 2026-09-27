@@ -19,6 +19,7 @@ import {
   REVIEWER_CONTRACT_NO_QUESTIONS, WORKER_CONTRACT, WORKER_CONTRACT_NO_QUESTIONS,
 } from './defaults'
 import { lessonsForContext } from './lessons'
+import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
 
 export const ACTION_KINDS = new Set(['email_draft', 'document', 'checklist', 'decision', 'call', 'delegate', 'note'])
@@ -124,6 +125,8 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
     previous_actions: previous.map((a) => ({ title: a.title, kind: a.kind, status: a.status, tom_feedback: a.user_feedback })),
     team_directory: pipeline.team_directory || '(not filled in yet: name roles rather than people)',
     lessons_from_tom: await lessonsForContext(pipeline.lessons_in_context),
+    what_aimelia_knows: await memoryForContext(`${task.title} ${task.notes || ''}`),
+    how_to_use_what_aimelia_knows: MEMORY_GUIDANCE,
     ...(facts ? { facts_from_ws_systems: facts } : {}),
     ...(followUp ? {
       this_is_a_follow_up: {
