@@ -172,7 +172,7 @@ function AutomationCard({ pipeline, channels, sources, onSaved }: {
   const [msg, setMsg] = useState<Msg>(null)
   const [testing, setTesting] = useState('')
   useEffect(() => setP(pipeline), [pipeline])
-  const keys: (keyof Pipeline)[] = ['stale_days', 'lessons_in_context', 'brief_enabled', 'brief_time', 'brief_weekends',
+  const keys: (keyof Pipeline)[] = ['stale_days', 'follow_up_days', 'lessons_in_context', 'brief_enabled', 'brief_time', 'brief_weekends',
     'work_start', 'work_end', 'focus_minutes', 'use_ws_systems']
   const dirty = keys.some((k) => p[k] !== pipeline[k])
   const set = (k: keyof Pipeline, v: any) => setP({ ...p, [k]: v })
@@ -212,6 +212,8 @@ function AutomationCard({ pipeline, channels, sources, onSaved }: {
             <input type="number" className="num" min={0} max={365} value={p.stale_days} onChange={(e) => set('stale_days', Number(e.target.value))} /></label>
           <label className="fld"><span>Your past corrections each agent sees (0 is off)</span>
             <input type="number" className="num" min={0} max={30} value={p.lessons_in_context} onChange={(e) => set('lessons_in_context', Number(e.target.value))} /></label>
+          <label className="fld"><span>Check an approved email or call came back after this many days (0 is off; handovers follow up on their due date)</span>
+            <input type="number" className="num" min={0} max={60} value={p.follow_up_days} onChange={(e) => set('follow_up_days', Number(e.target.value))} /></label>
         </div>
       </div>
       <div className="body">

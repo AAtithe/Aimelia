@@ -56,17 +56,46 @@ export async function createDueRoutines(today: Ymd = londonToday()): Promise<Row
   return made
 }
 
-/** After a handover is approved, park a check-in for its due date. */
-export async function scheduleFollowUp(task: Row, action: Row, today: Ymd = londonToday()): Promise<Row> {
+export type FollowUpType = 'delegate' | 'email' | 'call'
+/** Which approved actions need checking on later: work that has to come back from someone else. */
+export const FOLLOW_UP_KINDS: Record<string, FollowUpType> = { delegate: 'delegate', email_draft: 'email', call: 'call' }
+
+function followUpText(type: FollowUpType, owner: string, title: string, today: Ymd, due: Ymd, content: string) {
+  if (type === 'email') return { title: `Check ${owner} replied: ${title}`, notes: `Email approved on ${ukDate(today)}. Check on ${ukDate(due)} that ${owner} has replied and it is settled.\n\nEmail approved:\n${content}` }
+  if (type === 'call') return { title: `Check the call with ${owner} happened: ${title}`, notes: `Call approved on ${ukDate(today)}. Check on ${ukDate(due)} that it happened and anything from it is on the list.\n\nCall approved:\n${content}` }
+  return { title: `Check ${owner} delivered: ${title}`, notes: `Handed to ${owner} on ${ukDate(today)}, due back ${ukDate(due)}.\n\nHandover sent:\n${content}` }
+}
+
+/**
+ * After an email, call or handover is approved, park a check-in: a handover on its due date, an email or call
+ * `days` later (a week by default). A task gets one check-in, not one per action: a second approval while one
+ * is waiting is added to it. Returns null when follow-ups for that kind are switched off.
+ */
+export async function scheduleFollowUp(task: Row, action: Row, today: Ymd = londonToday(), days = 7): Promise<Row | null> {
+  const type = FOLLOW_UP_KINDS[action.kind]
+  if (!type || (type !== 'delegate' && days <= 0)) return null
   const d = action.details || {}
-  const owner = String(d.owner || 'the owner')
-  const due: Ymd = isYmd(d.due) ? d.due : addDays(today, 7)
+  const owner = String((type === 'email' ? d.to : type === 'call' ? d.with || d.who || d.attendees : d.owner) || (type === 'call' ? 'them' : 'the owner')).slice(0, 120)
+  const due: Ymd = type === 'delegate' && isYmd(d.due) ? d.due : addDays(today, type === 'delegate' ? 7 : days)
+  // A chaser approved on a check-in follows up on the original task.
+  const parentId = task.kind === 'follow_up' && task.parent_id ? task.parent_id : task.id
+  const item = { type, owner, action_id: action.id, title: action.title, content: action.content, approved: today }
+  const waiting = await one(`SELECT * FROM tasks WHERE kind = 'follow_up' AND parent_id = $1 AND status IN ('scheduled','due') AND id <> $2
+    ORDER BY created_at DESC LIMIT 1`, [parentId, task.id])
+  if (waiting) {
+    const f = waiting.follow_up || {}
+    const items = [...(f.items || []), item]
+    await q(`UPDATE tasks SET follow_up = $2::jsonb, notes = notes || $3, updated_at = now() WHERE id = $1`,
+      [waiting.id, json({ ...f, items }), `\n\nAlso approved on ${ukDate(today)}: ${action.title}\n${action.content}`])
+    await logEvent(waiting.id, 'status', 'aimelia', { status: waiting.status, reason: `also checking: ${action.title}` })
+    return (await one(`SELECT * FROM tasks WHERE id = $1`, [waiting.id]))!
+  }
+  const text = followUpText(type, owner, (await one(`SELECT title FROM tasks WHERE id = $1`, [parentId]))?.title || task.title, today, due, action.content)
   const follow = (await one(
     `INSERT INTO tasks (title, notes, priority, due_date, scheduled_for, status, kind, parent_id, follow_up, last_touched_at)
      VALUES ($1, $2, $3, $4, $4, 'scheduled', 'follow_up', $5, $6::jsonb, now()) RETURNING *`,
-    [`Check ${owner} delivered: ${task.title}`.slice(0, 500),
-      `Handed to ${owner} on ${ukDate(today)}, due back ${ukDate(due)}.\n\nHandover sent:\n${action.content}`,
-      task.priority, due, task.id, json({ owner, action_id: action.id, handover: action.content })],
+    [text.title.slice(0, 500), text.notes, task.priority, due, parentId,
+      json({ type, owner, action_id: action.id, handover: action.content, recipient: type === 'email' ? d.to || null : null, subject: d.subject || null, items: [item] })],
   ))!
   await logEvent(follow.id, 'status', 'aimelia', { status: 'scheduled', reason: `follow-up on ${ukDate(due)}` })
   return follow

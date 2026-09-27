@@ -9,12 +9,13 @@ import { usePathname } from 'next/navigation'
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { api, raw, SIGNED_OUT, type Briefing } from '@/lib/client/todo'
 import { ChatLauncher } from '@/components/chat/Chat'
+import { BandSearch } from '@/components/tasks/Filters'
 
 type Nav = { href: string; label: string; count?: (b: Briefing) => number }
 const GROUPS: [string, Nav[]][] = [
   ['My work', [
     { href: '/chat', label: 'Ask Aimelia' },
-    { href: '/today', label: 'Today', count: (b) => b.questions.length + b.actions.length + b.follow_ups.length },
+    { href: '/today', label: 'Today', count: (b) => b.questions.length + b.actions.length + (b.to_do?.length || 0) + b.follow_ups.length },
     { href: '/tasks', label: 'All tasks' },
     { href: '/import', label: 'Import tasks' },
     { href: '/routines', label: 'Routines' },
@@ -50,7 +51,7 @@ export function Shell({ title, sub, actions, children }: { title: string; sub: s
     <>
       <header>
         <div className="ttl"><h1>{title}</h1><div className="sub">{sub}</div></div>
-        {actions && <div className="who">{actions}</div>}
+        <div className="who">{actions}<BandSearch /></div>
       </header>
       <div className="wrap">{children}</div>
     </>
