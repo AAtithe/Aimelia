@@ -3,7 +3,7 @@
  *
  * - Aimelia's own secret (the encryption key) is generated on first use and stored here.
  * - Everything Tom or a developer enters in Settings (AI key, Microsoft app, Teams, ntfy,
- *   WSCIP and Payroll Command Center logins) is stored here encrypted with that key.
+ *   WSCIP and Payroll Command Center logins, Fireflies) is stored here encrypted with that key.
  * - A value set in Vercel's environment always wins, so a developer can still pin anything.
  *
  * Reads are synchronous from an in-memory copy that loadConfig() refreshes every 30 seconds;
@@ -16,6 +16,7 @@ export type ConfigKey =
   | 'ms_tenant_id' | 'ms_client_id' | 'ms_client_secret'
   | 'teams_webhook_url' | 'ntfy_url' | 'ntfy_token'
   | 'wscip_email' | 'wscip_password' | 'pcc_email' | 'pcc_password'
+  | 'fireflies_api_key'
 
 /** What Settings can edit, how it is labelled, and whether it is secret (never shown back). */
 export const EDITABLE: Record<ConfigKey, { label: string; env: string; secret: boolean; group: string }> = {
@@ -31,6 +32,7 @@ export const EDITABLE: Record<ConfigKey, { label: string; env: string; secret: b
   wscip_password: { label: 'WSCIP read-only user password', env: 'WSCIP_PASSWORD', secret: true, group: 'wscip' },
   pcc_email: { label: 'Payroll Command Center viewer email', env: 'PCC_EMAIL', secret: false, group: 'pcc' },
   pcc_password: { label: 'Payroll Command Center viewer password', env: 'PCC_PASSWORD', secret: true, group: 'pcc' },
+  fireflies_api_key: { label: 'Fireflies API key', env: 'FIREFLIES_API_KEY', secret: true, group: 'fireflies' },
 }
 
 let cache: { loadedAt: number; secret: string | null; values: Partial<Record<ConfigKey, string>> } = { loadedAt: 0, secret: null, values: {} }

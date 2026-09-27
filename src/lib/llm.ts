@@ -9,6 +9,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { env } from './env'
+import { actionLines } from './agents/importText'
 
 export type Provider = 'auto' | 'anthropic' | 'openai' | 'mock'
 export const DEFAULT_MODELS: Record<Exclude<Provider, 'auto'>, string> = {
@@ -142,6 +143,8 @@ function mockReply(call: ModelCall): string {
       const lines = String(p.brain_dump || '').split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean)
       return out({ tasks: lines.map((title) => ({ title, notes: '', priority: 2, due_date: null })) })
     }
+    case 'import':
+      return out({ tasks: actionLines(String(p.text || '')).map((title) => ({ title, notes: '', owner: null, priority: 2, due_date: null })) })
     case 'triage':
       return out({ category: 'General', urgency: 3, confidence: 0, reasoning: 'Placeholder: no AI key is set.', action_required: 'Read and decide.' })
     case 'worker':

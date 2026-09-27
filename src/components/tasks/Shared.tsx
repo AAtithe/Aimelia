@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { api, Task, PRIORITY_LABEL, dueState, fmtDate } from '@/lib/client/todo'
 import { StatusPill, VoiceButton } from './Cards'
@@ -83,7 +84,8 @@ export function BrainDump({ onAdded }: { onAdded: () => void }) {
         </div>
         {mode === 'dump' ? (
           <>
-            <p className="cap">Paste or dictate everything on your mind, as messy as it comes. It is split into separate tasks, and Triage decides which ones you do, delegate, defer or drop.</p>
+            <p className="cap">Paste or dictate everything on your mind, as messy as it comes. It is split into separate tasks, and Triage decides which ones you do, delegate, defer or drop.
+              For Microsoft To Do, Word documents, meeting notes or Fireflies, use <Link href="/import">Import tasks</Link>.</p>
             <textarea className="inp" rows={5} value={text} onChange={(e) => setText(e.target.value)} aria-label="Brain dump"
               placeholder={'Chase Corrigans for Q3 tronc sign-off before Friday\nBentleys want to talk about labour %, book a call\nReview Sam\'s pay rise case\nPrice for the new Soho group, 6 sites'} />
           </>

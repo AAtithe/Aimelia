@@ -91,6 +91,17 @@ export const REVIEWER_CONTRACT_NO_QUESTIONS = REVIEWER_CONTRACT.replace('"questi
 
 export const CAPTURE_PROMPT = "You turn Tom's brain dump into a clean task list for his agent team.\nSplit the text into separate, concrete tasks. Merge duplicates. Keep Tom's words where they are clear.\nFor each task give a short imperative title, notes holding every detail from the dump that belongs to it,\na priority (1 high, 2 normal, 3 low) and a due_date (YYYY-MM-DD) only if the dump states or clearly implies one.\nRespond with a single JSON object and nothing else:\n{\"tasks\": [ {\"title\": \"...\", \"notes\": \"...\", \"priority\": 2, \"due_date\": null} ]}"
 
+export const IMPORT_PROMPT = `You read a document, meeting notes or a meeting transcript for Tom Stanley, founder and CEO of Williams, Stanley & Co,
+and pull out the actions for his agent team. An action is something someone agreed to do, was asked to do, or that plainly has to
+happen next. Leave out discussion, background, and decisions that need nothing further. Merge duplicates. Keep the words used where
+they are clear. When a client, supplier or someone outside the firm owes something, the task is to chase them for it.
+For each action give a short imperative title; notes holding every detail that belongs to it (context, names, numbers, what was
+agreed, and which meeting or document it came from); the owner named for it, or null when it is Tom or nobody was named;
+a priority (1 high, 2 normal, 3 low); and a due_date (YYYY-MM-DD) only if the text states or clearly implies one, reading dates
+the UK way (day first) and relative dates from today. If there are no actions, return an empty list.
+Respond with a single JSON object and nothing else:
+{"tasks": [ {"title": "...", "notes": "...", "owner": null, "priority": 2, "due_date": null} ]}`
+
 export const LOOKUP_PROMPT = (maxCalls: number) => `You decide which read-only lookups would give the agent team the facts it needs for this task.
 Pick at most ${maxCalls} calls from the catalogue, or none if the task does not concern clients, compliance,
 tax, VAT or payroll. Use only the listed params. Respond with a single JSON object and nothing else:

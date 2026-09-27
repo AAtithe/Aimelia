@@ -11,7 +11,7 @@ export const TEST_ENV: Record<string, string> = {
 /** The test owner and their capture key (sent as X-Aimelia-Key by tests/helpers.ts). */
 export const TEST_USER = { email: 'owner@example.co', password: 'correct horse battery', key: 'test-access-key' }
 const CLEAR = ['ENCRYPTION_KEY', 'CRON_SECRET', 'AIMELIA_OWNER_EMAIL', 'OWNER_EMAIL_DOMAIN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'TEAMS_WEBHOOK_URL', 'NTFY_URL', 'NTFY_TOKEN', 'WSCIP_EMAIL',
-  'WSCIP_PASSWORD', 'WSCIP_TOKEN', 'PCC_EMAIL', 'PCC_PASSWORD', 'PCC_TOKEN', 'DATABASE_URL', 'POSTGRES_URL']
+  'WSCIP_PASSWORD', 'WSCIP_TOKEN', 'PCC_EMAIL', 'PCC_PASSWORD', 'PCC_TOKEN', 'FIREFLIES_API_KEY', 'DATABASE_URL', 'POSTGRES_URL']
 
 const pg = new PGlite()
 setExecutor(async (text, params = []) => (await pg.query(text, params as any[])).rows as any[])
