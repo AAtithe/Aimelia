@@ -24,9 +24,9 @@ function byTask(questions: Question[]) {
   return [...groups.values()]
 }
 
-type Section = 'questions' | 'approve' | 'todo' | 'follow' | 'failed' | 'done'
+type Section = 'questions' | 'approve' | 'todo' | 'follow' | 'overdue' | 'failed' | 'done'
 const SECTIONS: { key: Section; label: string }[] = [
-  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'failed', label: 'Failed runs' }, { key: 'done', label: 'Completed' },
+  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'overdue', label: 'Past due' }, { key: 'failed', label: 'Failed runs' }, { key: 'done', label: 'Completed' },
 ]
 const TAB_KEY = 'aimelia.today.tab'
 
@@ -69,7 +69,8 @@ export default function Today() {
   }
 
   const c = brief?.counts || {}
-  const overdue = (tasks || []).filter((t) => dueState(t.due_date, t.status)?.label === 'Overdue').length
+  const overdueTasks = (tasks || []).filter((t) => dueState(t.due_date, t.status)?.label === 'Overdue')
+  const overdue = overdueTasks.length
   const noKeys = brief && !brief.providers.anthropic && !brief.providers.openai
   const dash = '–'
   // The filter bar narrows every section; the figures along the top stay whole.
@@ -78,11 +79,14 @@ export default function Today() {
   const toDo = (brief?.to_do || []).filter((a) => passes(f, a.task_priority, a.title, a.content, a.task_title))
   const followUps = (brief?.follow_ups || []).filter((t) => passes(f, t.priority, t.title, t.notes))
   const upcoming = (brief?.upcoming_follow_ups || []).filter((t) => passes(f, t.priority, t.title, t.notes))
+  const pastDue = overdueTasks.filter((t) => passes(f, t.priority, t.title, t.notes, t.summary))
   const failed = (brief?.failed || []).filter((t) => passes(f, t.priority, t.title, t.notes, t.summary))
   const sizes: Record<Section, number> = { questions: questions.length, approve: approvals.length, todo: toDo.length,
-    follow: followUps.length, failed: failed.length, done: done?.length || 0 }
+    follow: followUps.length, overdue: pastDue.length, failed: failed.length, done: done?.length || 0 }
   // Until Tom picks one, open the first section with something in it.
-  const tab: Section = chosen && (chosen !== 'failed' || brief?.failed.length) ? chosen
+  // Past due and Failed runs are only offered while they have something in them.
+  const shown = (k: Section) => (k !== 'failed' || !!brief?.failed.length) && (k !== 'overdue' || overdue > 0)
+  const tab: Section = chosen && shown(chosen) ? chosen
     : (['questions', 'approve', 'todo', 'follow', 'failed'] as Section[]).find((k) => sizes[k]) || 'questions'
   // Completed work, the last month of it, searched on the server with the same filters.
   const settled = useSettled(f, 250)
@@ -106,8 +110,8 @@ export default function Today() {
         <div role="button" tabIndex={0} onClick={() => pick('approve')} onKeyDown={(e) => e.key === 'Enter' && pick('approve')} className={`kpi go ${brief?.actions.length ? '' : 'none'}`}><span className="n">{brief ? brief.actions.length : dash}</span><span className="l">Ready to approve</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('follow')} onKeyDown={(e) => e.key === 'Enter' && pick('follow')} className={`kpi go ${brief?.follow_ups.length ? 'warn' : 'none'}`}><span className="n">{brief ? brief.follow_ups.length : dash}</span><span className="l">Follow-ups due</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('todo')} onKeyDown={(e) => e.key === 'Enter' && pick('todo')} className={`kpi go ${toDo.length ? '' : 'none'}`}><span className="n">{brief ? toDo.length : dash}</span><span className="l">Approved, to do</span></div>
-        <div className={`kpi ${overdue ? 'alert' : ''}`}><span className="n">{tasks ? overdue : dash}</span><span className="l">Past their due date</span></div>
-        <div className={`kpi ${c.failed ? 'alert' : ''}`}><span className="n">{brief ? c.failed || 0 : dash}</span><span className="l">Runs that failed</span></div>
+        <div role="button" tabIndex={0} onClick={() => overdue && pick('overdue')} onKeyDown={(e) => e.key === 'Enter' && overdue && pick('overdue')} className={`kpi go ${overdue ? 'alert' : ''}`}><span className="n">{tasks ? overdue : dash}</span><span className="l">Past their due date</span></div>
+        <div role="button" tabIndex={0} onClick={() => c.failed && pick('failed')} onKeyDown={(e) => e.key === 'Enter' && c.failed && pick('failed')} className={`kpi go ${c.failed ? 'alert' : ''}`}><span className="n">{brief ? c.failed || 0 : dash}</span><span className="l">Runs that failed</span></div>
       </div>
       <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`} style={{ marginTop: -6 }}>{msg?.text}</div>
       {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
@@ -131,7 +135,7 @@ export default function Today() {
           <p className="cap today-flow">Answer the questions, approve the work, do what you approved, then check it came back.{working ? ` The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</p>
           <FilterBar f={f} set={setF} full={false} />
           <div className="main-tabs today-tabs" role="tablist">
-            {SECTIONS.filter((x) => x.key !== 'failed' || brief.failed.length).map((x) => (
+            {SECTIONS.filter((x) => shown(x.key)).map((x) => (
               <button key={x.key} role="tab" aria-selected={tab === x.key} className={`main-tab-btn ${tab === x.key ? 'active' : ''}`} onClick={() => pick(x.key)}>
                 {x.label}{x.key !== 'done' && <span className="hcount">{sizes[x.key]}</span>}
               </button>
@@ -179,6 +183,15 @@ export default function Today() {
                 </table></div>}
             </div>
           </>)}
+
+          {tab === 'overdue' && overdue > 0 && (
+            <div className="card"><h2>Past their due date <span className="hcount">{pastDue.length}</span></h2>
+              {pastDue.length ? <TaskTable tasks={pastDue} onOpen={setOpenTask} /> : <div className="emptyrow">Nothing matches the filter.</div>}
+              <div className="body" style={{ paddingTop: 8, paddingBottom: 12 }}>
+                <Link href="/tasks?due=overdue">See every past-due task, with more filters, in All tasks</Link>
+              </div>
+            </div>
+          )}
 
           {tab === 'failed' && brief.failed.length > 0 && (
             <div className="card"><h2>Runs that failed <span className="hcount">{failed.length}</span></h2>
