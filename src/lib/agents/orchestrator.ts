@@ -19,6 +19,7 @@ import {
   REVIEWER_CONTRACT_NO_QUESTIONS, WORKER_CONTRACT, WORKER_CONTRACT_NO_QUESTIONS,
 } from './defaults'
 import { lessonsForContext } from './lessons'
+import { documentsForContext } from './documents'
 import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
 import { BLOCKING, recordQuestions } from './questions'
@@ -134,6 +135,7 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
     lessons_from_tom: await lessonsForContext(pipeline.lessons_in_context),
     what_aimelia_knows: await memoryForContext(`${task.title} ${task.notes || ''}`),
     how_to_use_what_aimelia_knows: MEMORY_GUIDANCE,
+    ...((await documentsForContext(task.id)) ?? {}),
     ...(facts ? { facts_from_ws_systems: facts } : {}),
     ...(followUp ? {
       this_is_a_follow_up: {
@@ -283,7 +285,10 @@ export async function splitCapture(text: string) {
 export async function claimNext(): Promise<string | null> {
   const row = await one<{ id: string }>(
     `UPDATE tasks SET status = 'processing', claimed_at = now()
-     WHERE id = (SELECT id FROM tasks WHERE status = 'queued' ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+     WHERE id = (SELECT id FROM tasks WHERE status = 'queued'
+                   -- a task waits while its documents are being read
+                   AND NOT EXISTS (SELECT 1 FROM task_files f WHERE f.task_id = tasks.id AND f.status = 'reading')
+                 ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING id`)
   return row?.id ?? null
 }

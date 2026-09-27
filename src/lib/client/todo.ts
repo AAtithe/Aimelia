@@ -74,9 +74,31 @@ export interface Task {
   stale_nudged_at: string | null
   source?: string | null
   handover?: string
+  files?: TaskFile[]
   questions?: Question[]
   actions?: Action[]
   events?: AgentEvent[]
+}
+
+export interface TaskFile {
+  id: string
+  name: string
+  kind: 'pdf' | 'image' | 'text'
+  size: number
+  purpose: string
+  keep: boolean
+  status: 'reading' | 'ready' | 'failed'
+  error: string | null
+  created_at: string
+  read_at: string | null
+  reading: {
+    summary: string
+    overall: 'sound' | 'needs work' | 'not fit for purpose' | null
+    sections: { ref: string; title: string; says: string }[]
+    findings: { ref: string; rating: 'red' | 'amber' | 'green'; finding: string; requirement: string; change: string }[]
+    missing: string[]
+    questions: string[]
+  } | null
 }
 
 export interface Agent {

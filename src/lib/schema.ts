@@ -392,4 +392,27 @@ export const SCHEMA: string[] = [
   )`,
   // One weekly check per week, however many ticks see it due at once.
   `CREATE UNIQUE INDEX IF NOT EXISTS memory_reviews_week_idx ON memory_reviews (week) WHERE trigger = 'weekly'`,
+  // ---------------------------------------------------------------- documents attached to tasks
+  // Each one is read and assessed once by Claude; the agents work from that assessment (and the text, for text files).
+  `CREATE TABLE IF NOT EXISTS task_files (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    kind text NOT NULL,
+    media_type text NOT NULL,
+    size int NOT NULL DEFAULT 0,
+    data text,
+    text text,
+    purpose text NOT NULL DEFAULT '',
+    keep boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'reading',
+    reading jsonb,
+    error text,
+    attempts int NOT NULL DEFAULT 0,
+    claimed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    read_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS task_files_task_idx ON task_files (task_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS task_files_status_idx ON task_files (status, created_at)`,
 ]
