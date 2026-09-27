@@ -19,6 +19,7 @@ import { csvItems, fingerprint, jobState, queueImport, recentJobs, runImportJobs
 import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
 import { keepNote } from '../memory/store'
+import { attachFiles, FILE_COLS, fileOut, readTaskFiles } from './documents'
 import { answerQuestion, BLOCKING, dismissQuestion } from './questions'
 import { memoryEndpoints } from '../memory/api'
 
@@ -57,6 +58,8 @@ const ImportFile = z.object({ filename: z.string().trim().min(1).max(300), data:
   kind: z.enum(['document', 'meeting', 'list']).optional(), run_now: z.boolean().default(true), force: z.boolean().default(false) })
 const ImportTodo = z.object({ list_ids: z.array(z.string().min(1)).min(1), run_now: z.boolean().default(true) })
 const ImportAgain = z.object({ run_now: z.boolean().default(true), force: z.boolean().default(false) })
+const Attach = z.object({ files: z.array(z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(1) })).min(1).max(5),
+  purpose: z.string().trim().max(1000).default(''), keep_in_knowledge: z.boolean().default(false), run_now: z.boolean().default(true) })
 const FollowUp = z.object({ outcome: z.enum(['delivered', 'chase', 'snooze']), days: z.number().int().min(1).max(90).default(7) })
 const Defer = z.object({ until: ymd, reason: z.string().default('') })
 const Book = z.object({ minutes: z.number().int().min(15).max(480).optional() })
@@ -122,7 +125,8 @@ export async function fullTask(id: string) {
     q(`SELECT * FROM actions WHERE task_id = $1 AND status <> 'superseded' ORDER BY position`, [id]),
     q(`SELECT * FROM events WHERE task_id = $1 ORDER BY created_at`, [id]),
   ])
-  return { ...taskOut(t), questions: questions.map(questionOut), actions: actions.map(actionOut), events: events.map(eventOut) }
+  const files = await q(`SELECT ${FILE_COLS} FROM task_files WHERE task_id = $1 ORDER BY created_at`, [id])
+  return { ...taskOut(t), questions: questions.map(questionOut), actions: actions.map(actionOut), events: events.map(eventOut), files: files.map(fileOut) }
 }
 
 const kickQueue = (limit = 5) => runLater(() => processQueue({ limit }))
@@ -318,6 +322,35 @@ export const todoEndpoints: Endpoint[] = [
   }],
 
   ['GET', '/tasks/:id', async (_r, p) => fullTask(p.id)],
+  ['POST', '/tasks/:id/files', async (req, p) => {
+    const b = await body(req, Attach)
+    const total = b.files.reduce((n, f) => n + f.data.length, 0)
+    if (total > 4_200_000) fail(413, 'Those files are over 3 MB together. Attach them one at a time.')
+    await getTask(p.id)
+    const made = await attachFiles(p.id, b.files, { purpose: b.purpose, keep: b.keep_in_knowledge })
+    // Read after the response; the agents get only what is left of the five minutes, so a run is never cut off.
+    runLater(async () => {
+      const started = Date.now()
+      await readTaskFiles()
+      const left = 270_000 - (Date.now() - started)
+      if (b.run_now && left > 30_000) await processQueue({ limit: 5, budgetMs: left - 30_000 })
+    })
+    return Response.json({ files: made.map(fileOut), task: taskOut(await getTask(p.id)) }, { status: 201 })
+  }],
+  ['GET', '/tasks/:id/files/:file', async (_r, p) => {
+    const f = (await one(`SELECT name, kind, media_type, data, text FROM task_files WHERE task_id::text = $1 AND id::text = $2`, [p.id, p.file])) || fail(404, 'Document not found.')
+    const bytes = f!.data ? Buffer.from(f!.data, 'base64') : Buffer.from(String(f!.text || ''), 'utf8')
+    const name = encodeURIComponent(f!.kind === 'text' ? `${f!.name}.txt` : f!.name)
+    return new Response(bytes, { headers: { 'Content-Type': f!.kind === 'text' ? 'text/plain; charset=utf-8' : f!.media_type,
+      'Content-Disposition': `${f!.kind === 'image' ? 'inline' : 'attachment'}; filename*=UTF-8''${name}`, 'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; sandbox" } })
+  }],
+  ['DELETE', '/tasks/:id/files/:file', async (_r, p) => {
+    const r = await q(`DELETE FROM task_files WHERE task_id::text = $1 AND id::text = $2 RETURNING name`, [p.id, p.file])
+    if (!r.length) fail(404, 'Document not found.')
+    await q(`DELETE FROM kb_chunks WHERE source = 'policy' AND source_id = $1`, [`task-file-${p.file}`])
+    await logEvent(p.id, 'documents', 'tom', { removed: r[0].name })
+  }],
   ['PATCH', '/tasks/:id', async (req, p) => {
     const b = await body(req, TaskPatch)
     await getTask(p.id)
