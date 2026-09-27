@@ -7,9 +7,9 @@
  * until the time budget is spent, when it must reply. The protocol is plain JSON rather than a
  * provider's native tool use, so it works the same with Claude, OpenAI and the mock.
  *
- * With the Claude key it runs on the most capable model (CHAT_MODEL overrides it) at high effort,
- * with server-side fallback if that model declines. Web search runs on Claude Opus 5, which the
- * current web search tool supports.
+ * With the Claude key it runs on Claude Opus 5.5 (CHAT_MODEL overrides it) at high effort, set
+ * explicitly because Opus 5.5 defaults to medium, with server-side fallback if it declines. Web search
+ * runs on the same model. If the account cannot use it, both drop to Claude Opus 5.
  *
  * Tom can attach photos, PDFs and documents to a message (see files.ts). Photos and PDFs go to the model
  * as they are, for the last few messages only; documents go as their text.
@@ -37,9 +37,8 @@ import { calculate } from './calc'
 
 export const MAX_STEPS = 10
 const MAX_CALLS = 6
-export const CHAT_MODEL = 'claude-fable-5-1' // the most capable widely released Claude model
-const WEB_MODEL = 'claude-opus-5' // runs the current web search tool
-const FALLBACK_MODEL = 'claude-opus-5' // if this account cannot use CHAT_MODEL (access, data retention)
+export const CHAT_MODEL = 'claude-opus-5-5'
+const FALLBACK_MODEL = 'claude-opus-5' // if this account cannot use CHAT_MODEL (not yet offered to it, or its data retention settings)
 const BUDGET_MS = 230_000 // after this the agent must reply, inside Vercel's 300 seconds
 const HARD_STOP_MS = 285_000 // no single model call may run past this
 let chatModelRefused = false // remembered for the life of the server, so only the first chat pays for finding out
@@ -215,9 +214,19 @@ export const TOOLS: Record<string, Tool> = {
     about: 'Search the web for current outside facts: HMRC rates and thresholds, legislation and guidance, news on a client or supplier, market data. Returns an answer with its sources',
     args: '{"query": "what to find out, as a full question"}',
     available: () => !!env.anthropicKey(),
-    run: async (a) => complete({ provider: 'anthropic', model: WEB_MODEL, role: 'web', webSearch: 5, maxTokens: 4000, effort: 'medium',
-      system: 'You research questions for a UK hospitality accountancy firm. Search the web, prefer primary sources (gov.uk, HMRC, legislation.gov.uk, company filings), give the facts with figures and dates exactly as published, say when sources disagree or are out of date, and keep it brief. UK English.',
-      messages: [{ role: 'user', content: String(a.query || '') }], payload: a }),
+    run: async (a) => {
+      const call = { provider: 'anthropic' as const, role: 'web', webSearch: 5, maxTokens: 4000, effort: 'medium' as const, payload: a,
+        system: 'You research questions for a UK hospitality accountancy firm. Search the web, prefer primary sources (gov.uk, HMRC, legislation.gov.uk, company filings), give the facts with figures and dates exactly as published, say when sources disagree or are out of date, and keep it brief. UK English.',
+        messages: [{ role: 'user' as const, content: String(a.query || '') }] }
+      const model = chatModel()
+      try {
+        return await complete({ ...call, model })
+      } catch (e) {
+        if (!(model === CHAT_MODEL && refusedModel(e))) throw e
+        chatModelRefused = true
+        return complete({ ...call, model: FALLBACK_MODEL })
+      }
+    },
   },
   remember: {
     about: 'Keep a fact or preference for every future conversation, when Tom says to remember something (who someone is, how he likes things, standing instructions)',
@@ -315,6 +324,8 @@ export function chatModel() {
   return provider === 'anthropic' ? env.chatModel() || (chatModelRefused ? FALLBACK_MODEL : CHAT_MODEL) : resolveModel(provider)
 }
 export const resetChatModel = () => { chatModelRefused = false }
+/** The default model turned the request away outright (not offered to this account, or its data retention rules), rather than failing. */
+const refusedModel = (e: unknown) => !env.chatModel() && e instanceof LLMError && /\b(400|403|404)\b/.test(e.message)
 
 /** The tools that can run right now (the calendar needs Microsoft 365, lookups need WSCIP or PCC). */
 export async function availableTools(): Promise<string[]> {
@@ -415,7 +426,7 @@ export async function converse(rows: Turn[], now: () => number = Date.now): Prom
       return await complete({ ...call, model })
     } catch (e) {
       // The default model refused outright (not offered to this account, or its data retention rules): use Opus 5 from now on.
-      if (!(model === CHAT_MODEL && !env.chatModel() && e instanceof LLMError && /\b(400|403|404)\b/.test(e.message))) throw e
+      if (!(model === CHAT_MODEL && refusedModel(e))) throw e
       chatModelRefused = true
       model = FALLBACK_MODEL
       return complete({ ...call, model })

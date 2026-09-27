@@ -29,11 +29,12 @@ of tools, and answers with JSON, either tool calls or the reply. Tools run on th
 together), their results go back to the model, and it repeats up to ten steps of six calls. The protocol is plain JSON
 rather than a provider's native tool use, so it behaves the same on Claude, OpenAI and the mock.
 
-The model: with the Claude key it runs on Claude Fable 5.1 (`claude-fable-5-1`), the most capable widely released Claude
-model, at high effort, with server-side fallback to another model if it declines. `CHAT_MODEL` in Vercel overrides it.
-If the account cannot use Fable 5.1 (not offered to it, or its data retention settings), the first chat drops to Claude
-Opus 5 and stays there until the server restarts. A turn has a time budget: after 230 seconds it must reply, and no model
-call may run past 285 seconds, inside Vercel's 300. Each call gets one retry on an overload or rate limit.
+The model: with the Claude key it runs on Claude Opus 5.5 (`claude-opus-5-5`) at high effort, set explicitly because
+Opus 5.5 defaults to medium, with server-side fallback to another model if it declines. Web search runs on the same model.
+`CHAT_MODEL` in Vercel overrides it. If the account cannot use Opus 5.5 (not yet offered to it, or its data retention
+settings), the chat and web search drop to Claude Opus 5 and stay there until the server restarts. A turn has a time
+budget: after 230 seconds it must reply, and no model call may run past 285 seconds, inside Vercel's 300. Each call gets
+one retry on an overload or rate limit.
 
 What it has to work with, besides the tools: the agent team's house rules, the team directory, and everything Tom has
 asked it to remember (`chat_memory`), in every conversation.
@@ -46,7 +47,7 @@ asked it to remember (`chat_memory`), in every conversation.
 | update_task | Changes title, notes (or adds a line), priority, due date; closes a task or sends it back to the agents |
 | answer_question | Answers an open agent question; the task goes back to the team once none are left, as the button does |
 | calculate | Exact arithmetic (`src/lib/chat/calc.ts`, a parser, never eval): VAT, margins, labour %, variances. Every figure goes through it |
-| web_search | Claude's server-side web search, run on Claude Opus 5 (which the current tool supports); the answer comes back with its sources. Needs the Claude key |
+| web_search | Claude's server-side web search, on the chat model; the answer comes back with its sources. Needs the Claude key |
 | remember, forget | Standing facts and preferences, kept across conversations |
 | search_conversations | Earlier Ask Aimelia conversations |
 | search_knowledge, add_to_knowledge | The knowledge base: full-text search, and filing text Tom asks to keep |
