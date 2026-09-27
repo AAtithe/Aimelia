@@ -5,6 +5,9 @@
  * - Temperature is not sent to Claude: models after Opus 4.6 reject it. It applies to OpenAI only.
  * - A PDF is sent to Claude as a document block, so Claude reads the pages itself (text, tables and scans).
  * - A message can carry files (photos and PDFs). Claude reads both; OpenAI reads photos only.
+ * - effort sets how hard Claude thinks (the current models always think; there is no budget to set).
+ * - fallback: if Claude declines, the API re-runs the request on another model in the same call.
+ * - webSearch: Claude searches the web itself (a server-side tool) and the answer comes back with its sources.
  * - The mock gives deterministic answers so the whole app runs with no keys (demos, tests).
  * - Tests replace the transport with setModelTransport().
  */
@@ -34,7 +37,11 @@ export type ModelCall = {
   json?: boolean
   role: string // what the call is for: worker, reviewer, capture, lookup, triage, draft, brief ...
   payload?: unknown // structured input, for the mock and for tests
-  timeoutMs?: number // give up after this long, with no retries (the caller retries); for work inside a time-limited request
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' // Claude only
+  fallback?: boolean // Claude only: server-side fallback if the model declines
+  webSearch?: number // Claude only: allow up to this many web searches; the reply ends with its sources
+  retries?: number // with timeoutMs: how many times the SDK may retry (429, 5xx); default none
+  timeoutMs?: number // give up after this long (per attempt; no retries unless retries is set); for work inside a time-limited request
   pdf?: string // a base64 PDF, sent to Claude as a document block ahead of the first message; Claude only
 }
 export type Transport = (call: ModelCall & { provider: Exclude<Provider, 'auto'>; model: string }) => Promise<string>
@@ -90,15 +97,44 @@ const realTransport: Transport = async (call) => {
         : { type: 'image', source: { type: 'base64', media_type: f.media_type as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: f.data } }),
       { type: 'text', text: m.content }] }
     })
-    const params = { model: call.model, max_tokens: call.maxTokens ?? 4096, system: call.system, messages }
-    const opts = call.timeoutMs ? { timeout: call.timeoutMs, maxRetries: 0 } : undefined
+    const params = {
+      model: call.model, max_tokens: call.maxTokens ?? 4096, system: call.system, messages,
+      ...(call.effort ? { output_config: { effort: call.effort } } : {}),
+      ...(call.webSearch ? { tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: call.webSearch }] } : {}),
+    } as Anthropic.MessageCreateParamsNonStreaming
+    const opts = call.timeoutMs ? { timeout: call.timeoutMs, maxRetries: call.retries ?? 0 } : undefined
     // Long reads stream, so a big reply is not held to the SDK's non-streaming limits.
-    const res = call.pdf || (call.maxTokens ?? 0) > 8000
-      ? await client.messages.stream(params, opts).finalMessage()
-      : await client.messages.create(params, opts)
+    const stream = !!call.pdf || (call.maxTokens ?? 0) > 8000
+    const send = async (p: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> => {
+      if (call.fallback) {
+        const withFallback = { ...p, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } as any
+        try {
+          return (stream ? await client.beta.messages.stream(withFallback, opts).finalMessage() : await client.beta.messages.create(withFallback, opts)) as unknown as Anthropic.Message
+        } catch (e) {
+          // Where fallbacks are not offered (another platform, an older account), run the request as it is.
+          if (!(e instanceof Anthropic.BadRequestError && /fallback/i.test(e.message))) throw e
+        }
+      }
+      return stream ? client.messages.stream(p, opts).finalMessage() : client.messages.create(p, opts)
+    }
+    let res = await send(params)
+    const content: Anthropic.ContentBlock[] = [...res.content]
+    // A long web search can pause part way; send it back to carry on, a few times at most.
+    for (let i = 0; res.stop_reason === 'pause_turn' && i < 4; i++) {
+      res = await send({ ...params, messages: [...messages, { role: 'assistant', content: res.content }] })
+      content.push(...res.content)
+    }
     if (res.stop_reason === 'refusal') throw new LLMError('Claude declined to read this.')
-    return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
+    const text = content.map((b) => (b.type === 'text' ? b.text : '')).join('')
+    if (!call.webSearch) return text
+    const sources = new Map<string, string>()
+    for (const b of content) {
+      if (b.type !== 'text') continue
+      for (const c of (b.citations || []) as any[]) if (c.type === 'web_search_result_location' && c.url) sources.set(c.url, c.title || c.url)
+    }
+    return sources.size ? `${text.trim()}\n\nSources:\n${[...sources].map(([url, title]) => `- ${title}: ${url}`).join('\n')}` : text
   }
+  if (call.webSearch) throw new LLMError('Searching the web needs the Claude (Anthropic) API key.')
   if (call.pdf || call.messages.some((m) => m.files?.some((f) => f.kind === 'pdf'))) throw new LLMError('Reading PDFs needs the Claude (Anthropic) API key.')
   const key = env.openaiKey()
   if (!key) throw new LLMError('OPENAI_API_KEY is not set.')
@@ -162,6 +198,8 @@ function mockReply(call: ModelCall): string {
     }
     case 'import':
       return out({ tasks: actionLines(String(p.text || '')).map((title) => ({ title, notes: '', owner: null, priority: 2, due_date: null })) })
+    case 'web':
+      return 'Placeholder: no AI key is set, so nothing was searched.'
     case 'chat': {
       const got = (p.files || []).length ? ` I received ${p.files.join(', ')}, but cannot read it without a key.` : ''
       return out({ reply: `Placeholder reply: no AI key is set on the server, so I cannot read or answer yet.${got} Add the Claude (Anthropic) key in Settings.` })

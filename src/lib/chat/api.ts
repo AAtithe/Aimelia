@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { iso, json, one, q, type Row } from '../db'
 import { body, fail } from '../http'
 import type { Endpoint } from '../router'
-import { availableTools, converse, TOOLS, type Turn } from './agent'
+import { availableTools, chatModel, converse, TOOLS, type Turn } from './agent'
 import { ACCEPT, MAX_BASE64, MAX_FILES, readChatFile } from './files'
 
 const FileIn = z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(1) })
@@ -26,7 +26,7 @@ async function getChat(id: string) {
 export const chatEndpoints: Endpoint[] = [
   ['GET', '/chats', async () => {
     const tools = await availableTools()
-    return { chats: (await q(`SELECT * FROM chats ORDER BY updated_at DESC LIMIT 50`)).map(chatOut), tools: tools.map((name) => ({ name, does: TOOLS[name].about })), accept: ACCEPT }
+    return { chats: (await q(`SELECT * FROM chats ORDER BY updated_at DESC LIMIT 50`)).map(chatOut), tools: tools.map((name) => ({ name, does: TOOLS[name].about })), accept: ACCEPT, model: chatModel() }
   }],
   ['GET', '/chats/:id', async (_r, p) => {
     const c = await getChat(p.id)

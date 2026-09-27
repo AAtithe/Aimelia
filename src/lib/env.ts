@@ -30,6 +30,8 @@ export const env = {
   // AI
   anthropicKey: setting('ANTHROPIC_API_KEY', 'anthropic_api_key'),
   openaiKey: setting('OPENAI_API_KEY', 'openai_api_key'),
+  /** Optional: the model Ask Aimelia runs on with the Claude key; the most capable one by default. */
+  chatModel: () => read('CHAT_MODEL'),
   // Morning push
   teamsWebhook: setting('TEAMS_WEBHOOK_URL', 'teams_webhook_url'),
   ntfyUrl: setting('NTFY_URL', 'ntfy_url'),
