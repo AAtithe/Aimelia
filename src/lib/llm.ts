@@ -34,6 +34,7 @@ export type ModelCall = {
   json?: boolean
   role: string // what the call is for: worker, reviewer, capture, lookup, triage, draft, brief ...
   payload?: unknown // structured input, for the mock and for tests
+  timeoutMs?: number // give up after this long, with no retries (the caller retries); for work inside a time-limited request
   pdf?: string // a base64 PDF, sent to Claude as a document block ahead of the first message; Claude only
 }
 export type Transport = (call: ModelCall & { provider: Exclude<Provider, 'auto'>; model: string }) => Promise<string>
@@ -89,12 +90,12 @@ const realTransport: Transport = async (call) => {
         : { type: 'image', source: { type: 'base64', media_type: f.media_type as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: f.data } }),
       { type: 'text', text: m.content }] }
     })
-    const res = await client.messages.create({
-      model: call.model,
-      max_tokens: call.maxTokens ?? 4096,
-      system: call.system,
-      messages,
-    })
+    const params = { model: call.model, max_tokens: call.maxTokens ?? 4096, system: call.system, messages }
+    const opts = call.timeoutMs ? { timeout: call.timeoutMs, maxRetries: 0 } : undefined
+    // Long reads stream, so a big reply is not held to the SDK's non-streaming limits.
+    const res = call.pdf || (call.maxTokens ?? 0) > 8000
+      ? await client.messages.stream(params, opts).finalMessage()
+      : await client.messages.create(params, opts)
     if (res.stop_reason === 'refusal') throw new LLMError('Claude declined to read this.')
     return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
   }

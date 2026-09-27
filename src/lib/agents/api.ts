@@ -15,7 +15,7 @@ import { learningStats, recordLesson } from './lessons'
 import { buildBrief, channels, send } from './notify'
 import { getPipeline, logEvent, processQueue, seedDefaults, splitCapture } from './orchestrator'
 import { deferTask, firstDue, scheduleFollowUp, touch, type Cadence } from './schedule'
-import { csvItems, extractActions, fingerprint, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
+import { csvItems, fingerprint, jobState, queueImport, recentJobs, runImportJobs, type JobKind, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
 import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
 
@@ -125,12 +125,26 @@ async function requeue(id: string, reason: string, run = true) {
   if (run) kickQueue()
 }
 
-/** Read a pasted or uploaded import into tasks: a list is taken line by line (or row by row), anything else is read by the AI. */
-async function importItems(text: string, kind: 'document' | 'meeting' | 'list', title: string, csv = false) {
+/** A pasted or uploaded list, taken line by line (or row by row for a CSV). Anything the AI reads is queued instead. */
+function listImport(text: string, csv = false) {
   if (!text.trim()) fail(422, 'There is no text in that to read.')
-  const items = csv ? csvItems(text) : kind === 'list' ? listItems(text) : await extractActions(text, kind, title)
-  if (!items.length) fail(422, kind === 'list' ? 'No tasks found in that list.' : 'No actions found. If it is a plain list of tasks, import it as a list instead.')
+  const items = csv ? csvItems(text) : listItems(text)
+  if (!items.length) fail(422, 'No tasks found in that list.')
   return items
+}
+
+/** Queue an AI read and start it after the response: 202 with the job, or 409 when it was imported before. */
+async function queueReply(o: Parameters<typeof queueImport>[0]) {
+  const r = await queueImport(o)
+  if (r.duplicate) return importReply(r, false)
+  runLater(async () => {
+    const started = Date.now()
+    const done = await runImportJobs()
+    // Triage gets only what is left of the five minutes, so a task is never cut off mid-run.
+    const left = 270_000 - (Date.now() - started)
+    if (done.runNow && left > 30_000) await processQueue({ limit: 20, budgetMs: left - 30_000 })
+  })
+  return Response.json({ job: jobState((await one(`SELECT * FROM import_jobs WHERE id = $1`, [r.id]))!) }, { status: 202 })
 }
 
 /** What an import endpoint answers: the new tasks, or 409 saying when it was imported before. */
@@ -226,13 +240,16 @@ export const todoEndpoints: Endpoint[] = [
   // ---------------------------------------------------------------- imports: documents, meeting notes, Fireflies, Microsoft To Do
   ['GET', '/import', async () => {
     const ms = await connection().catch(() => ({ configured: false, connected: false }))
-    return { file_types: IMPORT_TYPES, microsoft_todo: { configured: ms.configured, connected: ms.connected }, fireflies: !!env.firefliesKey(), ...(await importHistory()) }
+    return { file_types: IMPORT_TYPES, microsoft_todo: { configured: ms.configured, connected: ms.connected }, fireflies: !!env.firefliesKey(),
+      jobs: await recentJobs(), ...(await importHistory()) }
   }],
   ['POST', '/import/text', async (req) => {
     const b = await body(req, ImportText)
     await seedDefaults()
-    const items = await importItems(b.text, b.kind, b.title)
-    return importReply(await saveImport({ source: b.kind, ref: fingerprint(b.text), title: b.title || (b.kind === 'list' ? 'Pasted list' : 'Pasted notes'), items, force: b.force }), b.run_now)
+    const title = b.title || (b.kind === 'list' ? 'Pasted list' : 'Pasted notes')
+    if (b.kind !== 'list') return queueReply({ kind: b.kind, title, ref: fingerprint(b.text), text: b.text, force: b.force, runNow: b.run_now })
+    const items = listImport(b.text)
+    return importReply(await saveImport({ source: b.kind, ref: fingerprint(b.text), title, items, force: b.force }), b.run_now)
   }],
   ['POST', '/import/file', async (req) => {
     const b = await body(req, ImportFile)
@@ -243,10 +260,8 @@ export const todoEndpoints: Endpoint[] = [
     try { pdf = isPdf(b.filename, buf) } catch (e) { fail(415, (e as Error).message) }
     if (pdf) {
       // Claude reads the PDF itself; a list PDF is still read for its tasks, one per item.
-      const kind = b.kind === 'meeting' ? 'meeting' : 'document'
-      const items = await extractActions('', kind, title, buf.toString('base64'))
-      if (!items.length) fail(422, 'No actions found in that PDF.')
-      return importReply(await saveImport({ source: kind, ref: createHash('sha256').update(buf).digest('hex').slice(0, 32), title, items, force: b.force }), b.run_now)
+      return queueReply({ kind: b.kind === 'meeting' ? 'meeting' : 'document', title, ref: createHash('sha256').update(buf).digest('hex').slice(0, 32),
+        pdf: buf.toString('base64'), force: b.force, runNow: b.run_now })
     }
     let text: string
     try { text = fileToText(b.filename, buf) } catch (e) {
@@ -255,8 +270,16 @@ export const todoEndpoints: Endpoint[] = [
     }
     const csv = /\.csv$/i.test(b.filename)
     const kind = b.kind ?? (csv ? 'list' : /\.(vtt|srt)$/i.test(b.filename) ? 'meeting' : 'document')
-    const items = await importItems(text!, kind, title, csv)
+    if (!text!.trim()) fail(422, 'There is no text in that to read.')
+    if (kind !== 'list') return queueReply({ kind: kind as JobKind, title, ref: fingerprint(text!), text: text!, force: b.force, runNow: b.run_now })
+    const items = listImport(text!, csv)
     return importReply(await saveImport({ source: kind, ref: fingerprint(text!), title, items, force: b.force }), b.run_now)
+  }],
+  ['GET', '/import/jobs/:id', async (_r, p) => {
+    const j = (await one(`SELECT * FROM import_jobs WHERE id = $1`, [p.id])) || fail(404, 'Import not found.')
+    const job = jobState(j!)
+    const tasks = job.task_ids.length ? (await q(`${TASK_SELECT} WHERE t.id = ANY($1) ORDER BY t.created_at`, [job.task_ids])).map(taskOut) : []
+    return { job, tasks }
   }],
   ['GET', '/import/todo/lists', async () => ({ lists: await todoLists() })],
   ['POST', '/import/todo', async (req) => {
