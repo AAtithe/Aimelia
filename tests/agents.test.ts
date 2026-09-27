@@ -239,12 +239,34 @@ describe('triage and capture', () => {
     expect(got.actions[0].details.owner).toBe('Mandy')
   })
 
-  it('splits a brain dump into clean tasks', async () => {
-    use(new Scripted({ other: { capture: [{ tasks: [{ title: 'Sign off Corrigans tronc', notes: 'Q3', priority: 1, due_date: '2026-10-01' }, { title: '', notes: 'junk' }, { title: 'Book Bentleys review', priority: 'x', due_date: 'next week' }] }] } }))
+  it('saves a brain dump at once, line by line, then splits it into clean tasks after the response', async () => {
+    const later: (() => Promise<unknown>)[] = []
+    setLaterHook((fn) => { later.push(fn) })
+    const s = use(new Scripted({ other: { capture: [{ tasks: [{ title: 'Sign off Corrigans tronc', notes: 'Q3', priority: 1, due_date: '2026-10-01' }, { title: '', notes: 'junk' }, { title: 'Book Bentleys review', priority: 'x', due_date: 'next week' }] }] } }))
     const r = await req('POST', '/capture', { text: 'tronc corrigans, bentleys review', run_now: false })
     expect(r.status).toBe(201)
-    expect(r.data.map((t: any) => t.title)).toEqual(['Sign off Corrigans tronc', 'Book Bentleys review'])
-    expect([r.data[0].priority, r.data[0].due_date, r.data[1].priority, r.data[1].due_date]).toEqual([1, '2026-10-01', 2, null])
+    // No model call before the answer: that was what made the bar slow.
+    expect(s.calls).toHaveLength(0)
+    expect(r.data.map((t: any) => [t.title, t.refining])).toEqual([['tronc corrigans, bentleys review', true]])
+    for (const fn of later.splice(0)) await fn()
+    const tasks = (await req('GET', '/tasks?sort=oldest')).data
+    expect(tasks.map((t: any) => t.title)).toEqual(['Sign off Corrigans tronc', 'Book Bentleys review'])
+    expect([tasks[0].priority, tasks[0].due_date, tasks[1].priority, tasks[1].due_date]).toEqual([1, '2026-10-01', 2, null])
+  })
+
+  it('joins lines the AI reads as one task, and leaves tasks alone once the team has started', async () => {
+    const later: (() => Promise<unknown>)[] = []
+    setLaterHook((fn) => { later.push(fn) })
+    use(new Scripted({ other: { capture: [{ tasks: [{ title: 'Price the Soho group, six sites', notes: 'Fixed fee' }] }] } }))
+    const r = await req('POST', '/capture', { text: 'price soho\nsix sites, fixed fee', run_now: false })
+    expect(r.data).toHaveLength(2)
+    for (const fn of later.splice(0)) await fn()
+    expect((await req('GET', '/tasks')).data.map((t: any) => t.title)).toEqual(['Price the Soho group, six sites'])
+
+    const again = await req('POST', '/capture', { text: 'chase p60s', run_now: false })
+    await q(`UPDATE tasks SET status = 'processing' WHERE id = $1`, [again.data[0].id])
+    for (const fn of later.splice(0)) await fn()
+    expect((await get(again.data[0].id)).title).toBe('chase p60s')
   })
 
   it('the placeholder model splits lines', async () => {

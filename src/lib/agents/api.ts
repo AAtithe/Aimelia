@@ -13,7 +13,7 @@ import { env } from '../env'
 import { bookFocus, CalendarError } from './calendarBlocks'
 import { learningStats, recordLesson } from './lessons'
 import { buildBrief, channels, send } from './notify'
-import { getPipeline, logEvent, processQueue, seedDefaults, splitCapture } from './orchestrator'
+import { captureLines, getPipeline, logEvent, processQueue, refineCapture, seedDefaults } from './orchestrator'
 import { deferTask, firstDue, FOLLOW_UP_KINDS, scheduleFollowUp, touch, type Cadence } from './schedule'
 import { csvItems, fingerprint, jobState, queueImport, recentJobs, runImportJobs, type JobKind, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
 import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
@@ -325,16 +325,20 @@ export const todoEndpoints: Endpoint[] = [
   ['POST', '/capture', async (req) => {
     const b = await body(req, Capture)
     await seedDefaults()
-    await keepNote('brain_dump', b.text, {}, `dump:${fingerprint(b.text)}`)
-    const items = await splitCapture(b.text)
-    if (!items.length) fail(422, 'No tasks found in that text.')
-    const made = []
-    for (const it of items) {
-      made.push(await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, $3, $4, now()) RETURNING *`,
-        [it.title, it.notes, it.priority, it.due_date]))
+    // Saved at once, one task per line, so the bar answers straight away. The AI split, which takes seconds, runs
+    // after the response and tidies the tasks before the team starts on them.
+    const lines = captureLines(b.text)
+    if (!lines.length) fail(422, 'No tasks found in that text.')
+    const made: Row[] = []
+    for (const it of lines) {
+      made.push((await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, 2, NULL, now()) RETURNING *`, [it.title, it.notes]))!)
     }
-    if (b.run_now) kickQueue(20)
-    return Response.json(made.map((t) => taskOut(t!)), { status: 201 })
+    await keepNote('brain_dump', b.text, {}, `dump:${fingerprint(b.text)}`)
+    runLater(async () => {
+      try { await refineCapture(b.text, made.map((t) => t.id)) } catch (e) { console.error('Capture refine failed', e) }
+      if (b.run_now) await processQueue({ limit: 20 })
+    })
+    return Response.json(made.map((t) => ({ ...taskOut({ ...t, open_questions: 0, ready_actions: 0 }), refining: true })), { status: 201 })
   }],
 
   // ---------------------------------------------------------------- imports: documents, meeting notes, Fireflies, Microsoft To Do
