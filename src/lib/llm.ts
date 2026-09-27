@@ -3,6 +3,7 @@
  *
  * - "auto" picks Anthropic when ANTHROPIC_API_KEY is set, then OpenAI, then the mock.
  * - Temperature is not sent to Claude: models after Opus 4.6 reject it. It applies to OpenAI only.
+ * - A PDF is sent to Claude as a document block, so Claude reads the pages itself (text, tables and scans).
  * - The mock gives deterministic answers so the whole app runs with no keys (demos, tests).
  * - Tests replace the transport with setModelTransport().
  */
@@ -31,6 +32,7 @@ export type ModelCall = {
   json?: boolean
   role: string // what the call is for: worker, reviewer, capture, lookup, triage, draft, brief ...
   payload?: unknown // structured input, for the mock and for tests
+  pdf?: string // a base64 PDF, sent to Claude as a document block ahead of the first message; Claude only
 }
 export type Transport = (call: ModelCall & { provider: Exclude<Provider, 'auto'>; model: string }) => Promise<string>
 
@@ -77,14 +79,19 @@ const realTransport: Transport = async (call) => {
     const key = env.anthropicKey()
     if (!key) throw new LLMError('ANTHROPIC_API_KEY is not set.')
     const client = new Anthropic({ apiKey: key })
+    const messages: Anthropic.MessageParam[] = call.messages.map((m, i) => i === 0 && call.pdf
+      ? { role: m.role, content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: call.pdf } }, { type: 'text', text: m.content }] }
+      : m)
     const res = await client.messages.create({
       model: call.model,
       max_tokens: call.maxTokens ?? 4096,
       system: call.system,
-      messages: call.messages,
+      messages,
     })
+    if (res.stop_reason === 'refusal') throw new LLMError('Claude declined to read this.')
     return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
   }
+  if (call.pdf) throw new LLMError('Reading PDFs needs the Claude (Anthropic) API key.')
   const key = env.openaiKey()
   if (!key) throw new LLMError('OPENAI_API_KEY is not set.')
   const client = new OpenAI({ apiKey: key })

@@ -80,9 +80,9 @@ function FileImport({ types, onAdded }: { types: string[]; onAdded: () => void }
   }
   return (
     <>
-      <p className="cap">A Word document, meeting minutes, a transcript (.vtt or .srt from Teams, Zoom or Fireflies), or a task list exported from Outlook
+      <p className="cap">A Word document or PDF, meeting minutes, a transcript (.vtt or .srt from Teams, Zoom or Fireflies), or a task list exported from Outlook
         as .csv. Documents and meetings are read for the actions only; discussion and background are left out. Anyone else named as owner is kept,
-        so Triage can hand it to them.</p>
+        so Triage can hand it to them. PDFs are read by Claude page by page, including tables and scanned pages, so they need the Claude key in Settings.</p>
       <div className="row2">
         <label className="fld"><span>File ({types.join(', ')})</span>
           <input type="file" accept={types.join(',')} onChange={(e) => { setFile(e.target.files?.[0] || null); imp.setMsg(null) }} />
@@ -154,7 +154,7 @@ function TodoImport({ status, onAdded }: { status: Status; onAdded: () => void }
     return (
       <>
         <p>Aimelia reads your To Do lists directly once Microsoft 365 is connected{ms.configured ? '' : ' (it is paused until the Microsoft app is set up)'}. Until then, either of these works now:</p>
-        <p className="cap">1. In To Do, open the list, choose the three dots, then Email list or Print list, and paste the text into Paste notes as a list of tasks.<br />
+        <p className="cap">1. In To Do, open the list, choose the three dots, then Email list and paste the text into Paste notes as a list of tasks, or Print list, save as PDF, and upload the PDF under From a file.<br />
           2. In Outlook, File, Open and Export, Export to a file, Comma Separated Values, Tasks folder. Upload the .csv under From a file.
           Titles, due dates, priority and notes come across; completed tasks are skipped.</p>
         {ms.configured && <div className="toolbar"><Link className="btn" href="/settings">Connect Microsoft 365</Link></div>}

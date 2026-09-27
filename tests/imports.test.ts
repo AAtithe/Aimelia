@@ -131,7 +131,56 @@ describe('importing documents and notes', () => {
   it('refuses files it cannot read, with what to do instead', async () => {
     expect((await upload('old.doc', Buffer.from('x'))).data.detail).toContain('save it as .docx')
     expect((await upload('broken.docx', Buffer.from('not a zip'))).status).toBe(415)
-    expect((await upload('notes.pdf', Buffer.from('%PDF'))).status).toBe(415)
+    expect((await upload('notes.pdf', Buffer.from('not really a pdf'))).status).toBe(415)
+  })
+})
+
+describe('PDFs, read by Claude', () => {
+  const PDF = Buffer.from('%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF')
+  const upload = (extra: Record<string, unknown> = {}) =>
+    req('POST', '/import/file', { filename: 'Corrigans board pack.pdf', data: PDF.toString('base64'), run_now: false, ...extra })
+
+  it('sends the whole PDF to Claude and keeps the actions', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    replies.import = { tasks: [{ title: 'Chase Corrigans for the Q3 tronc sign-off', notes: 'Board pack p4', owner: 'Mandy', priority: 1, due_date: '2026-10-09' }] }
+    const r = await upload()
+    expect(r.status).toBe(201)
+    expect(models[0].provider).toBe('anthropic')
+    expect(models[0].pdf).toBe(PDF.toString('base64'))
+    expect((models[0].payload as any).text).toContain('attached PDF')
+    expect(r.data[0]).toMatchObject({ title: 'Chase Corrigans for the Q3 tronc sign-off', priority: 1, due_date: '2026-10-09', source: 'document' })
+    expect(r.data[0].notes).toContain('Owner named: Mandy')
+    expect(r.data[0].notes).toContain('Imported from a document: Corrigans board pack.')
+    expect((await upload()).status).toBe(409)
+  })
+
+  it('the request to Anthropic carries the PDF as a document block before the instructions', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    setModelTransport(null) // the real SDK call, answered by the fake fetch
+    on('POST', /\/v1\/messages$/, () => ({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-sonnet-5', stop_reason: 'end_turn', stop_sequence: null,
+      usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: '{"tasks": [{"title": "Sign off the Q3 tronc"}]}' }] }))
+    const r = await upload()
+    expect(r.status).toBe(201)
+    const sent = hits.find((h) => h.url.hostname === 'api.anthropic.com')!.body
+    expect(sent.messages[0].content[0]).toEqual({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: PDF.toString('base64') } })
+    expect(sent.messages[0].content[1].type).toBe('text')
+    expect(r.data.map((t: any) => t.title)).toEqual(['Sign off the Q3 tronc'])
+  })
+
+  it('needs the Claude key, and says so', async () => {
+    const r = await upload()
+    expect(r.status).toBe(503)
+    expect(r.data.detail).toContain('Claude (Anthropic) API key')
+    expect(models).toHaveLength(0)
+  })
+
+  it('reports a failed read instead of inventing tasks', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    setModelTransport(async () => { throw new Error('overloaded') })
+    const r = await upload()
+    expect(r.status).toBe(502)
+    expect(r.data.detail).toContain('Claude could not read that PDF')
+    expect((await req('GET', '/tasks')).data).toHaveLength(0)
   })
 })
 
