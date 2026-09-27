@@ -116,6 +116,7 @@ relate to it. Decide what, if anything, is worth remembering for future work: la
 how Tom wants things done, and his preferences. Not one-off details of a single task, not pleasantries, not anything already held.
 Each memory is one short, plain statement that stands on its own, with the date when it matters ("Bentleys' year end is 31 March").
 Keep Tom's words where they are clear. Never invent or infer beyond what the note says.
+Never keep phone numbers, WhatsApp numbers or links: Tom adds those himself if he wants them kept.
 Compare with the related memories:
 - the note adds something new: add it
 - it restates one: confirm it
