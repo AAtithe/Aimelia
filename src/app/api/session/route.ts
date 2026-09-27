@@ -1,42 +1,36 @@
 /**
- * Sign in to Aimelia with the access key. Sets a signed, HttpOnly session cookie so the key
- * never sits in page storage. Five wrong keys from one address in 15 minutes locks that address out.
+ * Signing in. GET says whether you are signed in and whether this is a brand-new install.
+ * POST signs in with email and password. DELETE signs out this browser.
  */
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { clearSessionCookie, keyMatches, readCookie, SESSION_COOKIE, sessionCookie } from '@/lib/auth'
-import { unseal } from '@/lib/crypto'
-import { env } from '@/lib/env'
-import { one, q } from '@/lib/db'
+import { clearSessionCookie, currentUser, endSession, hasUsers, recordSignIn, signInLocked, startSession } from '@/lib/auth'
+import { verifyPassword } from '@/lib/crypto'
+import { one } from '@/lib/db'
 import { body, fail, route } from '@/lib/http'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ip = (req: Request) => (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+export const GET = route(async (req) => {
+  const user = await currentUser(req)
+  return { signed_in: !!user, user: user ? { email: user.email, name: user.name } : null, needs_setup: !(await hasUsers()) }
+}, { public: true })
 
 export const POST = route(async (req) => {
-  if (!env.accessKey()) fail(503, 'AIMELIA_ACCESS_KEY is not configured on the server.')
-  const { key } = await body(req, z.object({ key: z.string().min(1).max(500) }))
-  const who = ip(req)
-  const recent = (await one<{ n: number }>(
-    `SELECT count(*)::int AS n FROM sign_in_attempts WHERE ip = $1 AND NOT ok AND created_at > now() - interval '15 minutes'`, [who]))!.n
-  if (recent >= 5) fail(429, 'Too many wrong keys from this address. Wait 15 minutes and try again.')
-  const ok = keyMatches(key)
-  await q(`INSERT INTO sign_in_attempts (ip, ok) VALUES ($1, $2)`, [who, ok])
-  if (!ok) fail(401, 'That is not the access key set on the server.')
+  const b = await body(req, z.object({ email: z.string().trim().toLowerCase().min(3).max(200), password: z.string().min(1).max(500) }))
+  if (await signInLocked(req, b.email)) fail(429, 'Too many wrong passwords. Wait 15 minutes and try again.')
+  const u = await one<{ id: string; password_hash: string }>(`SELECT id, password_hash FROM users WHERE email = $1`, [b.email])
+  const ok = !!u && verifyPassword(b.password, u.password_hash)
+  await recordSignIn(req, b.email, ok)
+  if (!ok) fail(401, 'That email and password do not match.')
   const res = NextResponse.json({ signed_in: true })
-  res.headers.append('Set-Cookie', sessionCookie())
+  res.headers.append('Set-Cookie', await startSession(u!.id, req))
   return res
 }, { public: true })
 
-export const GET = route(async (req) => {
-  let signedIn = false
-  try { signedIn = unseal(readCookie(req, SESSION_COOKIE), 'session') === 'owner' } catch { signedIn = false }
-  return { signed_in: signedIn, configured: !!env.accessKey() && !!env.encryptionKey() }
-}, { public: true })
-
-export const DELETE = route(async () => {
+export const DELETE = route(async (req) => {
+  await endSession(req)
   const res = NextResponse.json({ signed_in: false })
   res.headers.append('Set-Cookie', clearSessionCookie())
   return res

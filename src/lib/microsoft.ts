@@ -1,7 +1,7 @@
 /**
- * Microsoft 365 connection for the owner's mailbox and calendar.
+ * Microsoft 365 connection for the owner's mailbox and calendar. The app details (tenant, client, secret) come from Settings.
  *
- * - Only AIMELIA_OWNER_EMAIL can connect: the signed-in account is checked before anything is stored.
+ * - Only a Microsoft account matching an Aimelia login can connect; it is checked before anything is stored.
  * - Sign-in state is sealed, expires in ten minutes, and must match a cookie set in the same browser.
  * - Tokens are encrypted at rest and never leave the server.
  * - Mail.Send is deliberately not requested: Aimelia writes drafts, it never sends.
@@ -77,7 +77,8 @@ export async function completeSignIn(code: string): Promise<string | null> {
   if (!me.ok) return 'could_not_confirm_account'
   const profile = (await me.json()) as { mail?: string; userPrincipalName?: string }
   const who = [profile.mail, profile.userPrincipalName].filter(Boolean).map((s) => String(s).toLowerCase())
-  const owners = env.ownerEmails()
+  // Only a Microsoft account matching an Aimelia login may connect.
+  const owners = (await q<{ email: string }>(`SELECT lower(email) AS email FROM users`)).map((r) => r.email)
   if (!who.some((w) => owners.includes(w))) return 'wrong_account'
   await store(tokens, who[0] || null)
   return null
@@ -104,10 +105,16 @@ export async function accessToken(): Promise<string | null> {
   }
 }
 
-export async function connection(): Promise<{ connected: boolean; account: string | null; expires_at: string | null }> {
+/** Microsoft 365 is paused until MS_TENANT_ID, MS_CLIENT_ID and MS_CLIENT_SECRET are all set. */
+export const microsoftConfigured = () => !!(env.msTenant() && env.msClientId() && env.msClientSecret())
+
+export const PAUSED_MESSAGE = 'Microsoft 365 is paused: it has not been set up yet. Email and calendar features switch on once a developer adds the Microsoft settings.'
+
+export async function connection(): Promise<{ configured: boolean; connected: boolean; account: string | null; expires_at: string | null }> {
+  if (!microsoftConfigured()) return { configured: false, connected: false, account: null, expires_at: null }
   const token = await accessToken()
   const row = await one<{ account: string; expires_at: string }>(`SELECT account, expires_at FROM ms_tokens WHERE owner = $1`, [OWNER])
-  return { connected: !!token, account: token ? row?.account || null : null, expires_at: token && row ? new Date(row.expires_at).toISOString() : null }
+  return { configured: true, connected: !!token, account: token ? row?.account || null : null, expires_at: token && row ? new Date(row.expires_at).toISOString() : null }
 }
 
 export async function disconnect() {
@@ -118,6 +125,7 @@ type GraphInit = { query?: Record<string, string | number | undefined>; body?: u
 
 /** Call Microsoft Graph as the owner. Throws GraphError(401) when not connected. */
 export async function graph<T = any>(method: string, path: string, init: GraphInit = {}): Promise<T> {
+  if (!microsoftConfigured()) throw new GraphError(503, PAUSED_MESSAGE)
   const token = await accessToken()
   if (!token) throw new GraphError(401, 'Aimelia is not connected to Microsoft 365. Connect it from Settings.')
   const qs = new URLSearchParams()

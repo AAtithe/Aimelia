@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, Task, AgentEvent, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime } from '@/lib/client/todo'
 import { ActionItem, QuestionItem, StatusPill } from './Cards'
+import { useShell } from '@/components/Shell'
 
 export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const [task, setTask] = useState<Task | null>(null)
@@ -11,6 +12,7 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [deferTo, setDeferTo] = useState('')
+  const calendarReady = !!useShell().microsoft?.connected
 
   const load = useCallback(async () => {
     try {
@@ -92,7 +94,7 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
             <div className="toolbar">
               <button className="btn" disabled={busy || task.status === 'processing'}
                 onClick={() => act(() => api(`/tasks/${task.id}/run`, { method: 'POST' }), 'Queued. The team will start on it now.')}>Run the team again</button>
-              {task.status !== 'done' && (
+              {task.status !== 'done' && calendarReady && (
                 <button className="btn" disabled={busy}
                   onClick={() => act(() => api(`/tasks/${task.id}/book`, { method: 'POST', body: {} }).then((r) =>
                     setMsg({ ok: true, text: `Booked ${fmtDateTime(r.event.start)} to ${r.event.end.slice(11, 16)} in your calendar.` })), null)}>

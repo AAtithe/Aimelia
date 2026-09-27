@@ -16,6 +16,7 @@ const GROUPS: [string, Nav[]][] = [
     { href: '/tasks', label: 'All tasks' },
     { href: '/routines', label: 'Routines' },
   ]],
+  // Hidden while Microsoft 365 is paused (not set up yet).
   ['Email and meetings', [
     { href: '/email', label: 'Email triage' },
     { href: '/calendar', label: 'Calendar and briefs' },
@@ -35,7 +36,8 @@ const GROUPS: [string, Nav[]][] = [
   ]],
 ]
 
-type Ctx = { brief: Briefing | null; refreshBrief: () => void; microsoft: { connected: boolean; account: string | null } | null }
+type Microsoft = { configured: boolean; connected: boolean; account: string | null }
+type Ctx = { brief: Briefing | null; refreshBrief: () => void; microsoft: Microsoft | null }
 const ShellContext = createContext<Ctx>({ brief: null, refreshBrief: () => {}, microsoft: null })
 export const useShell = () => useContext(ShellContext)
 
@@ -53,7 +55,7 @@ export function Shell({ title, sub, actions, children }: { title: string; sub: s
 
 export function AppFrame({ children }: { children: React.ReactNode }) {
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
-  const [configured, setConfigured] = useState(true)
+  const [needsSetup, setNeedsSetup] = useState(false)
   const [brief, setBrief] = useState<Briefing | null>(null)
   const [microsoft, setMicrosoft] = useState<Ctx['microsoft']>(null)
   const [menu, setMenu] = useState(false)
@@ -61,9 +63,9 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
   const check = useCallback(async () => {
     try {
-      const s = await raw<{ signed_in: boolean; configured: boolean }>('/session')
+      const s = await raw<{ signed_in: boolean; needs_setup: boolean }>('/session')
       setSignedIn(s.signed_in)
-      setConfigured(s.configured)
+      setNeedsSetup(s.needs_setup)
     } catch {
       setSignedIn(false)
     }
@@ -71,7 +73,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
   const refreshBrief = useCallback(() => {
     api<Briefing>('/briefing').then(setBrief).catch(() => {})
-    raw('/auth/status').then(setMicrosoft).catch(() => setMicrosoft({ connected: false, account: null }))
+    raw('/auth/status').then(setMicrosoft).catch(() => setMicrosoft({ configured: false, connected: false, account: null }))
   }, [])
 
   useEffect(() => { check() }, [check])
@@ -106,11 +108,11 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
           </>
         )}
       </div>
-      {signedIn === null ? null : !signedIn ? <SignIn configured={configured} onDone={check} /> : (
+      {signedIn === null ? null : !signedIn ? <SignIn needsSetup={needsSetup} onDone={check} /> : (
         <ShellContext.Provider value={{ brief, refreshBrief, microsoft }}>
           <div className="app">
             <nav className={`sidenav ${menu ? 'open' : ''}`} aria-label="Sections">
-              {GROUPS.map(([group, items]) => (
+              {GROUPS.filter(([group]) => group !== 'Email and meetings' || microsoft?.configured !== false).map(([group, items]) => (
                 <div key={group}>
                   <div className="grp">{group}</div>
                   {items.map((n) => {
@@ -125,7 +127,8 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
               ))}
               <div className="connect">
                 <span className={`dot ${microsoft?.connected ? 'on' : ''}`} />
-                {microsoft === null ? 'Checking Microsoft 365 ...' : microsoft.connected ? `Microsoft 365: ${microsoft.account}` : <Link href="/settings" style={{ padding: 0, border: 0 }}>Microsoft 365 not connected</Link>}
+                {microsoft === null ? 'Checking Microsoft 365 ...' : !microsoft.configured ? <Link href="/settings" style={{ padding: 0, border: 0 }}>Microsoft 365 paused</Link>
+                  : microsoft.connected ? `Microsoft 365: ${microsoft.account}` : <Link href="/settings" style={{ padding: 0, border: 0 }}>Microsoft 365 not connected</Link>}
               </div>
             </nav>
             <main className="content">{children}</main>
@@ -136,16 +139,19 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-function SignIn({ configured, onDone }: { configured: boolean; onDone: () => void }) {
-  const [key, setKey] = useState('')
+function SignIn({ needsSetup, onDone }: { needsSetup: boolean; onDone: () => void }) {
+  const [f, setF] = useState({ name: '', email: '', password: '', confirm: '' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const set = (k: keyof typeof f, v: string) => setF({ ...f, [k]: v })
 
   const submit = async () => {
-    setBusy(true)
     setErr('')
+    if (needsSetup && f.password !== f.confirm) return setErr('The two passwords do not match.')
+    setBusy(true)
     try {
-      await raw('/session', { method: 'POST', body: { key } })
+      if (needsSetup) await raw('/setup', { method: 'POST', body: { name: f.name, email: f.email, password: f.password } })
+      else await raw('/session', { method: 'POST', body: { email: f.email, password: f.password } })
       onDone()
     } catch (e: any) {
       setErr(e.message)
@@ -153,16 +159,31 @@ function SignIn({ configured, onDone }: { configured: boolean; onDone: () => voi
       setBusy(false)
     }
   }
+  const enter = (e: React.KeyboardEvent) => e.key === 'Enter' && submit()
+  const ready = needsSetup ? f.name && f.email && f.password.length >= 10 && f.confirm : f.email && f.password
 
   return (
     <div className="signin">
-      <h2>Sign in to Aimelia</h2>
-      <p className="sub">Enter the access key. This browser stays signed in for 30 days.</p>
-      {!configured && <div className="note warn">The server is missing AIMELIA_ACCESS_KEY or ENCRYPTION_KEY. Set both in Vercel, then redeploy.</div>}
-      <label className="fld"><span>Access key</span>
-        <input type="password" autoFocus autoComplete="current-password" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && key && submit()} />
-      </label>
-      <button className="btn primary" style={{ width: '100%' }} disabled={!key || busy} onClick={submit}>{busy ? 'Checking ...' : 'Sign in'}</button>
+      <h2>{needsSetup ? 'Welcome to Aimelia' : 'Sign in to Aimelia'}</h2>
+      <p className="sub">{needsSetup
+        ? 'This is a new install. Create your login: it becomes the owner account, and sign-up then closes.'
+        : 'This browser stays signed in for 30 days.'}</p>
+      {needsSetup && (
+        <label className="fld"><span>Your name</span>
+          <input autoFocus autoComplete="name" value={f.name} onChange={(e) => set('name', e.target.value)} onKeyDown={enter} /></label>
+      )}
+      <label className="fld"><span>Email</span>
+        <input type="email" autoFocus={!needsSetup} autoComplete="username" value={f.email} onChange={(e) => set('email', e.target.value)} onKeyDown={enter}
+          placeholder={needsSetup ? 'you@williamsstanley.co' : ''} /></label>
+      <label className="fld"><span>{needsSetup ? 'Choose a password (at least 10 characters)' : 'Password'}</span>
+        <input type="password" autoComplete={needsSetup ? 'new-password' : 'current-password'} value={f.password} onChange={(e) => set('password', e.target.value)} onKeyDown={enter} /></label>
+      {needsSetup && (
+        <label className="fld"><span>Type it again</span>
+          <input type="password" autoComplete="new-password" value={f.confirm} onChange={(e) => set('confirm', e.target.value)} onKeyDown={enter} /></label>
+      )}
+      <button className="btn primary" style={{ width: '100%' }} disabled={!ready || busy} onClick={submit}>
+        {busy ? 'One moment ...' : needsSetup ? 'Create my login' : 'Sign in'}
+      </button>
       <div className={`msg ${err ? 'err' : ''}`}>{err}</div>
     </div>
   )

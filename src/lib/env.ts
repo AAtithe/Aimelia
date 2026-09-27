@@ -1,17 +1,21 @@
 /**
- * Every setting in one place, read at call time (so tests can change them).
- * Secrets are set in the Vercel project, never in git. See docs/SETUP.md.
+ * Every setting in one place. Each one is read from Vercel's environment first, then from what
+ * was saved in Aimelia's Settings (src/lib/config.ts). Nothing here has to be set by hand:
+ * the database comes from the Neon integration and the app generates its own secret.
  */
+import { stored, type ConfigKey } from './config'
+
 const read = (name: string): string | undefined => {
   const v = process.env[name]
   return v && v.trim() ? v.trim() : undefined
 }
+const setting = (envName: string, key: ConfigKey) => () => read(envName) ?? stored(key)
 
 export const env = {
-  accessKey: () => read('AIMELIA_ACCESS_KEY'),
-  encryptionKey: () => read('ENCRYPTION_KEY'),
-  ownerEmails: () => (read('AIMELIA_OWNER_EMAIL') || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  /** Optional: Vercel Cron sends it as a bearer token when set. Without it the tick is throttled instead. */
   cronSecret: () => read('CRON_SECRET'),
+  /** Optional: only Microsoft accounts on this domain may be used to create the first login. */
+  ownerDomain: () => (read('OWNER_EMAIL_DOMAIN') ?? 'williamsstanley.co').toLowerCase(),
   appUrl: () => {
     const explicit = read('APP_URL')
     if (explicit) return explicit.replace(/\/$/, '')
@@ -20,21 +24,21 @@ export const env = {
   },
   timezone: () => read('TIMEZONE') || 'Europe/London',
   // Microsoft 365
-  msTenant: () => read('MS_TENANT_ID'),
-  msClientId: () => read('MS_CLIENT_ID'),
-  msClientSecret: () => read('MS_CLIENT_SECRET'),
+  msTenant: setting('MS_TENANT_ID', 'ms_tenant_id'),
+  msClientId: setting('MS_CLIENT_ID', 'ms_client_id'),
+  msClientSecret: setting('MS_CLIENT_SECRET', 'ms_client_secret'),
   // AI
-  anthropicKey: () => read('ANTHROPIC_API_KEY'),
-  openaiKey: () => read('OPENAI_API_KEY'),
+  anthropicKey: setting('ANTHROPIC_API_KEY', 'anthropic_api_key'),
+  openaiKey: setting('OPENAI_API_KEY', 'openai_api_key'),
   // Morning push
-  teamsWebhook: () => read('TEAMS_WEBHOOK_URL'),
-  ntfyUrl: () => read('NTFY_URL'),
-  ntfyToken: () => read('NTFY_TOKEN'),
+  teamsWebhook: setting('TEAMS_WEBHOOK_URL', 'teams_webhook_url'),
+  ntfyUrl: setting('NTFY_URL', 'ntfy_url'),
+  ntfyToken: setting('NTFY_TOKEN', 'ntfy_token'),
   // Read-only lookups
-  wscip: () => ({ base: read('WSCIP_BASE_URL') || 'https://operations.williamsstanley.co', email: read('WSCIP_EMAIL'),
-    password: read('WSCIP_PASSWORD'), token: read('WSCIP_TOKEN') }),
-  pcc: () => ({ base: read('PCC_BASE_URL') || 'https://payrollcc.vercel.app', email: read('PCC_EMAIL'),
-    password: read('PCC_PASSWORD'), token: read('PCC_TOKEN') }),
+  wscip: () => ({ base: read('WSCIP_BASE_URL') || 'https://operations.williamsstanley.co', email: read('WSCIP_EMAIL') ?? stored('wscip_email'),
+    password: read('WSCIP_PASSWORD') ?? stored('wscip_password'), token: read('WSCIP_TOKEN') }),
+  pcc: () => ({ base: read('PCC_BASE_URL') || 'https://payrollcc.vercel.app', email: read('PCC_EMAIL') ?? stored('pcc_email'),
+    password: read('PCC_PASSWORD') ?? stored('pcc_password'), token: read('PCC_TOKEN') }),
 }
 
 export const redirectUri = () => `${env.appUrl()}/api/auth/callback`

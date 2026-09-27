@@ -3,13 +3,14 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { mail } from '@/lib/client/todo'
-import { Shell } from '@/components/Shell'
+import { Shell, useShell } from '@/components/Shell'
 import { londonTime, MsgLine, useLoad, type Msg } from '@/components/mail/common'
 
 export default function Automation() {
   const { data, load } = useLoad(() => mail<{ jobs: any[]; logs: any[] }>('/jobs'))
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState<Msg>(null)
+  const paused = useShell().microsoft?.configured === false
 
   const patch = async (id: string, b: unknown) => { await mail(`/jobs/${id}`, { method: 'PATCH', body: b }).catch((e) => setMsg({ ok: false, text: e.message })); load() }
   const runNow = async (id: string) => {
@@ -21,6 +22,7 @@ export default function Automation() {
   return (
     <Shell title="Automation" sub="What Aimelia does by itself, on a timer that checks every 10 minutes. Nothing is ever sent from your mailbox.">
       <div className="note">The agent team also works its queue in the background, and the morning push goes to Teams or your phone at the time set in <Link href="/team">Agent team</Link>. Email jobs run only while Microsoft 365 is connected.</div>
+      {paused && <div className="note info"><b>The email jobs are paused</b> until Microsoft 365 is set up. The agent team, routines and the morning push run as normal.</div>}
       <div className="card"><h2>Jobs</h2>
         {!data ? <div className="emptyrow">Reading ...</div> : data.jobs.map((j) => (
           <div className="agent" key={j.id}>

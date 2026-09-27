@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { mail } from '@/lib/client/todo'
-import { Shell } from '@/components/Shell'
-import { MsgLine, useLoad, type Msg } from '@/components/mail/common'
+import { Shell, useShell } from '@/components/Shell'
+import { MsgLine, useLoad, type Msg, MicrosoftPaused } from '@/components/mail/common'
 
 type Result = { success: boolean; draft_content?: string; word_count?: number; meets_requirements?: boolean; sensitive_topics?: string[]; draft_link?: string | null; message?: string }
 
@@ -26,6 +26,9 @@ export default function SmartDrafting() {
   }
 
   const list = emails.data?.triaged_emails || []
+  const paused = useShell().microsoft?.configured === false
+  if (paused) return <Shell title="Smart drafting" sub="Paused until Microsoft 365 is set up."><MicrosoftPaused /></Shell>
+
   return (
     <Shell title="Smart drafting" sub="Replies in your voice: UK English, decisive, 120 to 180 words. Drafts go to Outlook in the same thread, tagged Drafted by Aimelia, and are never sent.">
       <div className="grid2">

@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkAccess } from './auth'
+import { loadConfig } from './config'
 import { ConfigError } from './crypto'
 import { GraphError } from './microsoft'
 import { LLMError } from './llm'
@@ -25,6 +26,7 @@ type Handler<P> = (req: Request, params: P) => Promise<unknown>
 export function route<P = any>(fn: Handler<P>, opts: { public?: boolean } = {}) {
   return async (req: Request, ctx: Ctx<P>) => {
     try {
+      await loadConfig()
       if (!opts.public) {
         const denied = await checkAccess(req)
         if (denied) return denied

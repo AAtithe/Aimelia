@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { api, mail } from '@/lib/client/todo'
 import { Shell, useShell } from '@/components/Shell'
-import { londonTime, MsgLine, NotConnected, UrgencyPill, useLoad, type Msg } from '@/components/mail/common'
+import { londonTime, MsgLine, NotConnected, UrgencyPill, useLoad, type Msg, MicrosoftPaused } from '@/components/mail/common'
 
 type Email = { id: string; subject: string; from: string; from_name: string; received: string; preview: string
   triage: { category: string; urgency: number; confidence: number; method: string; reasoning: string; action_required: string | null }
@@ -30,6 +30,9 @@ export default function EmailTriage() {
   }
 
   const rows = data?.triaged_emails || []
+  const paused = microsoft?.configured === false
+  if (paused) return <Shell title="Email triage" sub="Paused until Microsoft 365 is set up."><MicrosoftPaused /></Shell>
+
   return (
     <Shell title="Email triage" sub="Your latest mail, sorted by category and urgency. Keyword rules first, AI for the rest. Nothing is ever sent."
       actions={<button className="btn ghost" disabled={busy} onClick={check}>{busy ? 'Checking ...' : 'Check for new mail'}</button>}>

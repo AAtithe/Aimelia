@@ -7,7 +7,7 @@
 | Pages (house style) | `src/app/(app)/*`, frame in `src/components/Shell.tsx`, styles in `src/app/house.css` |
 | Agent Tasks API | `/api/todo/*`, `src/lib/agents/api.ts` |
 | Email and meetings API | `/api/mail/*`, `src/lib/email/api.ts` |
-| Sign-in | `/api/session` (access key, HttpOnly cookie), `/api/auth/*` (Microsoft 365) |
+| Sign-in | `/api/setup` (first login), `/api/session` (email and password), `/api/account` (password, devices, keys, settings), `/api/auth/*` (Microsoft 365) |
 | Background | Vercel Cron calls `/api/cron/tick` every 10 minutes (`src/lib/tick.ts`) |
 | Database | Neon Postgres; schema in `src/lib/schema.ts`, applied automatically |
 
@@ -32,13 +32,21 @@ Center through a fixed list of read-only lookups.
 
 ## Security
 
-- Every route needs the session cookie or the `X-Aimelia-Key` header, except `/api/health`, `/api/session` (sign-in, rate
-  limited to five wrong keys per address per 15 minutes) and the Microsoft sign-in return. A test enumerates every
-  endpoint and fails if one answers without access.
-- Cookie-authenticated writes from another site are refused.
-- Microsoft sign-in: sealed ten-minute state tied to the browser that started it; only `AIMELIA_OWNER_EMAIL` can connect;
-  tokens are encrypted with AES-256-GCM and never leave the server. `Mail.Send` is not requested.
-- Model output is shown as text, never as HTML.
+- Logins are email and password, hashed with scrypt. A new install asks for the owner's account on first visit (firm
+  domain only, and only while no account exists; the insert is atomic). Five wrong passwords per address or per email
+  in 15 minutes locks further tries.
+- Sessions are random tokens in an HttpOnly, SameSite=Lax cookie; only a hash is stored, so they can be listed and
+  revoked. Changing the password signs out every other browser. Cookie-authenticated writes from another site are refused.
+- Capture keys for the iPhone shortcut are shown once and stored hashed.
+- Every API route needs a session or a capture key, except `/api/health`, sign-in, first-run setup and the Microsoft
+  return. A test enumerates every endpoint and fails if one answers without access.
+- Aimelia generates its own secret on first use and keeps it in the database (or uses `ENCRYPTION_KEY` if a developer
+  pins one in Vercel). Microsoft tokens and every key entered in Settings are encrypted with AES-256-GCM using keys
+  derived from it. Anyone holding a copy of the database could read them; pinning `ENCRYPTION_KEY` in Vercel removes that.
+- The background timer needs no secret: without `CRON_SECRET` it runs at most once every four minutes and tells an
+  unauthenticated caller nothing.
+- Microsoft sign-in: sealed ten-minute state tied to the starting browser; the Microsoft account must match an Aimelia
+  login; `Mail.Send` is not requested. Model output is shown as text, never as HTML.
 
 ## What changed from the old app
 

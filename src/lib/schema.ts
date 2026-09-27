@@ -212,4 +212,37 @@ export const SCHEMA: string[] = [
     message text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
   )`,
+  // ---------------------------------------------------------------- people, sessions, settings
+  `CREATE TABLE IF NOT EXISTS app_config (
+    key text PRIMARY KEY,
+    value text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS users (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    email text NOT NULL UNIQUE,
+    name text NOT NULL DEFAULT '',
+    password_hash text NOT NULL,
+    role text NOT NULL DEFAULT 'owner',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_sign_in_at timestamptz
+  )`,
+  `CREATE TABLE IF NOT EXISTS sessions (
+    token_hash text PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_agent text NOT NULL DEFAULT '',
+    ip text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS api_keys (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name text NOT NULL DEFAULT 'Capture key',
+    token_hash text NOT NULL UNIQUE,
+    last_used_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `ALTER TABLE sign_in_attempts ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT ''`,
 ]

@@ -61,7 +61,7 @@ export function AgentTeam() {
       </div>
       {noKeys && (
         <div className="note warn">
-          No AI key is set on the server, so every agent is giving placeholder answers. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in Vercel.
+          No AI key is set on the server, so every agent is giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.
         </div>
       )}
 
@@ -216,7 +216,7 @@ function AutomationCard({ pipeline, channels, sources, onSaved }: {
       </div>
       <div className="body">
         <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>Morning push to Teams and your phone</h3>
-        <p className="cap">Teams is {on(channels.teams)}; phone is {on(channels.phone)}. They are set in Vercel with TEAMS_WEBHOOK_URL and NTFY_URL. Never email.</p>
+        <p className="cap">Teams is {on(channels.teams)}; phone is {on(channels.phone)}. Set them up in <a href="/settings">Settings</a>. Never email.</p>
         <label className="chk"><input type="checkbox" checked={p.brief_enabled} onChange={(e) => set('brief_enabled', e.target.checked)} />Send a morning brief</label>
         <div className="row2">
           <label className="fld"><span>At (London time)</span><input type="time" value={p.brief_time} onChange={(e) => set('brief_time', e.target.value)} /></label>
@@ -235,7 +235,7 @@ function AutomationCard({ pipeline, channels, sources, onSaved }: {
       </div>
       <div className="body">
         <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>WSCIP and Payroll Command Center</h3>
-        <p className="cap">WSCIP is {on(sources.wscip)}; Payroll Command Center is {on(sources.pcc)}. The agents only read, through a read-only user in each system, and every lookup is listed in the task&apos;s history.</p>
+        <p className="cap">WSCIP is {on(sources.wscip)}; Payroll Command Center is {on(sources.pcc)}. Add their read-only logins in <a href="/settings">Settings</a>. The agents only read, and every lookup is listed in the task&apos;s history.</p>
         <label className="chk"><input type="checkbox" checked={p.use_ws_systems} onChange={(e) => set('use_ws_systems', e.target.checked)} />Let the agents look things up in these systems</label>
         <div className="toolbar"><button className="btn" disabled={!!testing} onClick={() => test('sources')}>{testing === 'sources' ? 'Checking ...' : 'Check the connections'}</button></div>
         {dirty && (

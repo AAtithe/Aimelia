@@ -1,6 +1,6 @@
-import { TEST_ENV } from './setup'
+import { TEST_USER } from './setup'
 
-export const KEY = { 'x-aimelia-key': TEST_ENV.AIMELIA_ACCESS_KEY }
+export const KEY = { 'x-aimelia-key': TEST_USER.key }
 
 type Handler = (req: Request, ctx: { params: Promise<any> }) => Promise<Response>
 

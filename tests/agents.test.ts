@@ -492,3 +492,12 @@ describe('database guards', () => {
     expect((await one(`SELECT status FROM tasks WHERE id = $1`, [t.id]))!.status).toBe('processing')
   })
 })
+
+describe('capture is never lost', () => {
+  it('falls back to one task per line when the model fails', async () => {
+    setModelTransport(async () => { throw new Error('invalid x-api-key') })
+    const r = await req('POST', '/capture', { text: '- Chase Bentleys P60s\n- Book the Soho pricing call', run_now: false })
+    expect(r.status).toBe(201)
+    expect(r.data.map((t: any) => t.title)).toEqual(['Chase Bentleys P60s', 'Book the Soho pricing call'])
+  })
+})

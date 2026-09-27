@@ -248,11 +248,18 @@ async function saveActions(taskId: string, draft: Draft[], approved: boolean,
 
 export async function splitCapture(text: string) {
   const pipeline = await getPipeline()
-  const reply = await completeJson({
-    provider: 'auto', role: 'capture', temperature: 0.2,
-    system: `${CAPTURE_PROMPT}\n\nHouse rules:\n${pipeline.house_rules}`,
-    payload: { brain_dump: text, today: londonToday() },
-  })
+  let reply: any
+  try {
+    reply = await completeJson({
+      provider: 'auto', role: 'capture', temperature: 0.2,
+      system: `${CAPTURE_PROMPT}\n\nHouse rules:\n${pipeline.house_rules}`,
+      payload: { brain_dump: text, today: londonToday() },
+    })
+  } catch (e) {
+    // Never lose a brain dump because the AI is down or misconfigured: one task per line instead.
+    console.error('Capture split failed, falling back to lines', (e as Error).message)
+    reply = { tasks: text.split('\n').map((l) => l.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim()).filter(Boolean).map((title) => ({ title })) }
+  }
   const out: { title: string; notes: string; priority: number; due_date: string | null }[] = []
   for (const t of Array.isArray(reply.tasks) ? reply.tasks : []) {
     if (!t || !String(t.title || '').trim()) continue
