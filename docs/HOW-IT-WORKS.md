@@ -25,22 +25,41 @@ Center through a fixed list of read-only lookups.
 
 A chatbot Tom can talk to about his work, as a page (`/chat`, first in My work) and as a drawer opened by the Ask Aimelia
 button on every other page. It is an agent, not just a chat: each turn the model sees the conversation and a fixed list
-of tools, and answers with JSON, either tool calls or the reply. Tools run on the server, their results go back to the
-model, and it repeats up to six times (four calls a step) before it must answer. The protocol is plain JSON rather than a
-provider's native tool use, so it behaves the same on Claude, OpenAI and the mock. The house rules from the agent team
-apply to it too.
+of tools, and answers with JSON, either tool calls or the reply. Tools run on the server (the calls in one step run
+together), their results go back to the model, and it repeats up to ten steps of six calls. The protocol is plain JSON
+rather than a provider's native tool use, so it behaves the same on Claude, OpenAI and the mock.
+
+The model: with the Claude key it runs on Claude Fable 5.1 (`claude-fable-5-1`), the most capable widely released Claude
+model, at high effort, with server-side fallback to another model if it declines. `CHAT_MODEL` in Vercel overrides it.
+If the account cannot use Fable 5.1 (not offered to it, or its data retention settings), the first chat drops to Claude
+Opus 5 and stays there until the server restarts. A turn has a time budget: after 230 seconds it must reply, and no model
+call may run past 285 seconds, inside Vercel's 300. Each call gets one retry on an overload or rate limit.
+
+What it has to work with, besides the tools: the agent team's house rules, the team directory, and everything Tom has
+asked it to remember (`chat_memory`), in every conversation.
 
 | Tool | What it does |
 |---|---|
 | briefing | What is waiting on Tom: counts, open questions, drafts to approve, follow-ups due |
 | search_tasks, get_task | Find tasks by words or status; read one with its draft actions and questions |
-| create_task | Adds a task for the agent team (source `chat`), as Add task does. Only when Tom asks |
+| create_task | Adds a task for the agent team (source `chat`), as Add task does |
+| update_task | Changes title, notes (or adds a line), priority, due date; closes a task or sends it back to the agents |
 | answer_question | Answers an open agent question; the task goes back to the team once none are left, as the button does |
-| add_to_knowledge | Files text in the knowledge base (for a photo or PDF, the text it read), as Add a document does. Only when Tom asks |
-| search_knowledge | The knowledge base, full-text |
+| calculate | Exact arithmetic (`src/lib/chat/calc.ts`, a parser, never eval): VAT, margins, labour %, variances. Every figure goes through it |
+| web_search | Claude's server-side web search, run on Claude Opus 5 (which the current tool supports); the answer comes back with its sources. Needs the Claude key |
+| remember, forget | Standing facts and preferences, kept across conversations |
+| search_conversations | Earlier Ask Aimelia conversations |
+| search_knowledge, add_to_knowledge | The knowledge base: full-text search, and filing text Tom asks to keep |
 | recent_emails | Sorted email from triage, as stored |
-| upcoming_meetings | The calendar, read only. Offered only while Microsoft 365 is connected |
-| ws_lookup | The same read-only WSCIP and Payroll Command Center catalogue the agents use. Offered only when one is connected |
+| search_email, read_email | The whole Outlook mailbox through Graph search, and one email in full |
+| draft_email | A threaded reply or new email saved as a draft in Outlook, tagged "Drafted by Aimelia". Never sent |
+| upcoming_meetings, meeting_brief | The calendar (read), and writing or refreshing a meeting brief |
+| book_focus_time | Focus time in the first free slot in working hours |
+| ws_lookup | The same read-only WSCIP and Payroll Command Center catalogue the agents use |
+
+The Microsoft tools are offered only while Microsoft 365 is connected, web search only with the Claude key, and the
+lookups only when WSCIP or PCC is connected. The tools that change things run only when Tom asks for that outcome.
+Nothing is ever sent: email only ever becomes a draft for Tom to send himself. Each reply lists the steps it took.
 
 Photos, PDFs and documents can go with any message: Attach, drag and drop, or paste a screenshot (up to five files,
 about 3 MB together, Vercel's request limit). Photos over about 1 MB, and every iPhone HEIC photo the browser can open,
@@ -53,8 +72,7 @@ are kept in `chat_files` with their message and shown back as thumbnails and lin
 photo and PDF types, or as plain text, with `nosniff`. To keep turns fast and cheap, photos and PDFs are sent to the
 model again only for the six most recent messages; older ones are named as no longer in view.
 
-It cannot send email or change the calendar; asked to, it offers to add a task so the team drafts it for approval. Each
-reply lists the steps it took. Conversations are kept (`chats`, `chat_messages`), the last 20 messages go to the model,
+Conversations are kept (`chats`, `chat_messages`), the last 20 messages go to the model,
 Tom's message and files are saved before the model is called so a failure loses nothing, and conversations can be deleted.
 
 ## Importing tasks
