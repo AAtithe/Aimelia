@@ -1,12 +1,12 @@
 /**
- * Direct reports and 1-2-1 prep, mounted under /api/todo: /reports for the people, their points, the prep sheet and
- * the 1-2-1s held. Same access rules as every other endpoint.
+ * Direct reports and 1-2-1 prep, mounted under /api/todo: /reports for the people, the list for each 1-2-1 (built from
+ * tasks, projects, email and meetings, plus Tom's points) and the prep sheet. Same access rules as every other endpoint.
  */
 import { z } from 'zod'
 import { one, q } from '../db'
 import { body, fail } from '../http'
 import { type Endpoint } from '../router'
-import { addPoint, dismissCroppedUp, getReport, markHeld, pointOut, POINT_KINDS, reportOut, reportView, seedReports, writePrep } from './oneToOnes'
+import { addPoint, dismissTask, getReport, markHeld, pointOut, POINT_KINDS, reportOut, reportView, seedReports, writePrep } from './oneToOnes'
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD')
 const ReportIn = z.object({ name: z.string().trim().min(1).max(120), area: z.string().trim().max(120).default(''), email: z.string().trim().max(300).default(''),
@@ -14,9 +14,8 @@ const ReportIn = z.object({ name: z.string().trim().min(1).max(120), area: z.str
 const ReportPatch = z.object({ name: z.string().trim().min(1).max(120), area: z.string().trim().max(120), email: z.string().trim().max(300), notes: z.string().max(10_000),
   every_days: z.number().int().min(1).max(365), next_on: ymd.nullable(), active: z.boolean(), position: z.number().int().min(0).max(1000) }).partial()
 const PointIn = z.object({ text: z.string().trim().max(2000).optional(), kind: z.enum(POINT_KINDS).optional(), task_id: z.string().uuid().nullable().optional() })
-const PointPatch = z.object({ text: z.string().trim().min(1).max(2000), kind: z.enum(POINT_KINDS), status: z.enum(['open', 'discussed', 'dropped']),
-  outcome: z.string().max(2000) }).partial()
-const Held = z.object({ notes: z.string().max(20_000).default(''), carry_over: z.array(z.string().uuid()).max(200).default([]), held_on: ymd.optional(),
+const PointPatch = z.object({ text: z.string().trim().min(1).max(2000), kind: z.enum(POINT_KINDS), status: z.enum(['open', 'discussed', 'dropped']) }).partial()
+const Held = z.object({ carry_over: z.array(z.string().uuid()).max(200).default([]), held_on: ymd.optional(),
   next_on: ymd.nullable().optional() })
 const Dismiss = z.object({ task_id: z.string().uuid() })
 
@@ -61,7 +60,7 @@ export const reportEndpoints: Endpoint[] = [
   ['POST', '/reports/:id/dismiss', async (req, p) => {
     const b = await body(req, Dismiss)
     const r = await getReport(p.id)
-    await dismissCroppedUp(r!.id, b.task_id)
+    await dismissTask(r!.id, b.task_id)
     return reportView(r!)
   }],
   ['POST', '/reports/:id/prep', async (_r, p) => reportView(await writePrep(await getReport(p.id)))],

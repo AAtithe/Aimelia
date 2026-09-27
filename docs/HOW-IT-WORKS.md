@@ -154,16 +154,19 @@ Tom's message and files are saved before the model is called so a failure loses 
 
 - **Direct reports.** Starts with James (Commercial), Danielle (Enablement), Natasha (Operations), David G (Development)
   and Sandeep (Finance). People can be renamed, added or removed; the five are seeded once and never again.
-- **The list for the next 1-2-1.** Focus points, and tasks that have cropped up. A task point is linked to the task list,
-  so the list shows where it stands. A task can be put on a list from the task itself ("Raise at a 1-2-1"), or from
-  Ask Aimelia (`add_one_to_one_point`, by name or area: "put the Corrigans renewal on James's list").
-- **Cropped up.** Open tasks that name a report (first name as a whole word, in the title, notes or a handover) and are
-  not on their list are offered: add it, or "not for this 1-2-1" and it is not offered again.
-- **Prep sheet.** Claude writes it from the list, where each task stands, their tasks done in the last 45 days, the
-  standing notes about them, the notes from last time and what Aimelia knows: what to recognise, the focus points with the
-  question that opens each up, what to hold them to, three coaching questions and the commitments to leave with.
-- **After the 1-2-1.** The points it covered are closed, the ones ticked carry over, the notes are kept (and learned from
-  on What Aimelia knows) and the next date is set, a fortnight on unless changed. Ask Aimelia reads it all with `one_to_one_prep`.
+- **The list builds itself** from what Aimelia already holds, since the last 1-2-1 (or the last 30 days before the first):
+  open tasks that name them (first name as a whole word in the title or notes, the owner a meeting-notes import named, or
+  a handover to them), flagged when overdue, waiting on Tom, failed or with no movement in 14 days, and marked when new
+  since last time; their tasks done since last time, to recognise; active projects that name them; and, with their work
+  email set, emails from them that need action and meetings they were in. "Not for [name]" takes a task off for good.
+- **Tom's own points.** Focus points and anything that has cropped up, typed in, raised from a task ("Raise at a 1-2-1")
+  or added through Ask Aimelia (`add_one_to_one_point`, by name or area). Ask Aimelia reads the list with `one_to_one_prep`.
+- **Prep sheet.** Claude writes it from the list, the standing notes about them and what Aimelia knows: what to recognise,
+  the focus points, live work with flagged items first, what has not moved since last time, three coaching questions and
+  the commitments to leave with. Written as plain text for Employment Hero.
+- **Employment Hero is the record.** 1-2-1 notes are not kept in Aimelia. "Copy for Employment Hero" copies the prep sheet
+  (or the list) to paste into the 1-2-1 there. Marking it done here closes Tom's points (ticked ones carry over), clears
+  the prep sheet, starts the next list from that day and sets the next date, a fortnight on unless changed.
 
 ## Documents on a task
 

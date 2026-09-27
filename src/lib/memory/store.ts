@@ -28,7 +28,6 @@ export const NOTE_SOURCES = {
   brain_dump: 'A brain dump',
   chat: 'Ask Aimelia',
   memory_answer: 'Your answer to a memory question',
-  one_to_one: 'Your 1-2-1 notes',
 } as const
 export type NoteSource = keyof typeof NOTE_SOURCES
 

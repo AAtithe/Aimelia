@@ -40,63 +40,79 @@ describe('1-2-1 prep', () => {
     expect((await reports()).map((x: any) => x.name)).toEqual(['James', 'Danielle', 'Natasha', 'David G', 'Priya'])
   })
 
-  it('keeps focus points and tasks that have cropped up, and offers open tasks that mention them', async () => {
+  it('builds the list from tasks, projects, email and meetings without being asked', async () => {
     const james = await byName('James')
     await req('POST', `/reports/${james.id}/points`, { text: 'Pipeline for Q4: three new groups signed' })
     const pricing = await task('Chase James on the Soho pricing proposal')
+    const imported = await task('Send the Corrigans renewal', 'Owner named: James')
     const other = await task('Board pack', 'Natasha to send the ops numbers')
     await task('Jameson whisky order') // not a whole-word match
+    const won = await task('James to sign Daffodil Mulligans')
+    await req('PATCH', `/tasks/${won.id}`, { status: 'done' })
+    await q(`UPDATE tasks SET due_date = $2 WHERE id = $1`, [pricing.id, addDays(londonToday(), -2)])
+    await req('POST', '/projects', { kind: 'project', title: 'Payroll bureau launch', next_step: 'James to price it' })
+    await req('PATCH', `/reports/${james.id}`, { email: 'James@williamsstanley.co' })
+    await q(`INSERT INTO emails (graph_id, from_email, subject, received_at, action_required) VALUES ('m1', 'james@williamsstanley.co', 'Soho proposal', now(), 'Approve the discount')`)
+    await q(`INSERT INTO meetings (graph_event_id, subject, start_at, attendees) VALUES ('e1', 'Pipeline review', now() - interval '1 day', '["james@williamsstanley.co"]')`)
+
     let j = await byName('James')
     expect(j.points.map((p: any) => [p.kind, p.text])).toEqual([['focus', 'Pipeline for Q4: three new groups signed']])
-    expect(j.cropped_up.map((t: any) => t.title)).toEqual(['Chase James on the Soho pricing proposal'])
-    expect((await byName('Natasha')).cropped_up.map((t: any) => t.id)).toEqual([other.id])
+    expect(j.from_tasks.map((t: any) => [t.title, t.flag])).toEqual([['Chase James on the Soho pricing proposal', 'overdue'], ['Send the Corrigans renewal', null]])
+    expect(j.delivered.map((t: any) => t.title)).toEqual(['James to sign Daffodil Mulligans'])
+    expect(j.projects.map((p: any) => p.title)).toEqual(['Payroll bureau launch'])
+    expect(j.emails).toEqual([expect.objectContaining({ subject: 'Soho proposal', action: 'Approve the discount' })])
+    expect(j.meetings.map((m: any) => m.subject)).toEqual(['Pipeline review'])
+    expect(j.agenda).toContain('Recognise\n- James to sign Daffodil Mulligans')
+    expect(j.agenda).toContain('Chase James on the Soho pricing proposal (queued, due')
+    expect((await byName('Natasha')).from_tasks.map((t: any) => t.id)).toEqual([other.id])
 
-    // Added from the suggestion: linked to the task, and no longer offered. Adding it again does not duplicate it.
+    // Taken off: not picked up for them again.
+    await req('POST', `/reports/${james.id}/dismiss`, { task_id: imported.id })
+    j = await byName('James')
+    expect(j.from_tasks.map((t: any) => t.id)).toEqual([pricing.id])
+    // Linked by hand shows once, as Tom's point; taking it off keeps it off.
     await req('POST', `/reports/${james.id}/points`, { task_id: pricing.id })
     await req('POST', `/reports/${james.id}/points`, { task_id: pricing.id })
     j = await byName('James')
-    expect(j.cropped_up).toEqual([])
-    const linked = j.points.find((p: any) => p.kind === 'task')
-    expect(linked).toMatchObject({ text: 'Chase James on the Soho pricing proposal', task: { id: pricing.id, status: 'queued' } })
-    expect(j.points.length).toBe(2)
-
-    // Dismissed: not offered again.
-    const natasha = await byName('Natasha')
-    await req('POST', `/reports/${natasha.id}/dismiss`, { task_id: other.id })
-    expect((await byName('Natasha')).cropped_up).toEqual([])
-    expect((await byName('Natasha')).points).toEqual([])
-
-    // Dropped points leave the list.
-    await req('PATCH', `/report-points/${linked.id}`, { status: 'dropped' })
-    expect((await byName('James')).points.length).toBe(1)
+    expect(j.from_tasks).toEqual([])
+    expect(j.points.find((p: any) => p.kind === 'task')).toMatchObject({ task: { id: pricing.id } })
+    await req('POST', `/reports/${james.id}/dismiss`, { task_id: pricing.id })
+    j = await byName('James')
+    expect([j.points.length, j.from_tasks.length]).toEqual([1, 0])
   })
 
-  it('writes the prep sheet from the list, the tasks and last time', async () => {
+  it('writes the prep sheet from the list', async () => {
     const d = await byName('Danielle')
     await req('PATCH', `/reports/${d.id}`, { notes: 'Wants to lead the onboarding revamp' })
     await req('POST', `/reports/${d.id}/points`, { text: 'Onboarding time for new clients', kind: 'focus' })
+    await task('Danielle to rewrite the onboarding checklist')
     replies.one_to_one = ['Open with: agree the onboarding target.']
     const r = (await req('POST', `/reports/${d.id}/prep`)).data
     expect(r.prep).toBe('Open with: agree the onboarding target.')
     const c = calls.find((x) => x.role === 'one_to_one')!
     expect((c.payload as any).person).toEqual({ name: 'Danielle', area: 'Enablement', standing_notes: 'Wants to lead the onboarding revamp' })
     expect((c.payload as any).focus_points).toEqual(['Onboarding time for new clients'])
+    expect((c.payload as any).open_tasks.map((t: any) => t.title)).toEqual(['Danielle to rewrite the onboarding checklist'])
+    expect(c.system).toContain('Employment Hero')
     expect(c.system).toContain('no em dashes')
   })
 
-  it('closes what a 1-2-1 covered, carries the rest over, keeps the notes and sets the next date', async () => {
+  it('marking a 1-2-1 done closes Tom\'s points, keeps no notes, and starts the next list from today', async () => {
     const s = await byName('Sandeep')
     const a = (await req('POST', `/reports/${s.id}/points`, { text: 'Three-day close slipping at two clients' })).data
     const b = (await req('POST', `/reports/${s.id}/points`, { text: 'Cash forecast for the bank' })).data
+    const old = await task('Sandeep to fix the Bentleys close')
     await one(`UPDATE reports SET prep = 'old prep' WHERE id = $1`, [s.id])
-    const r = (await req('POST', `/reports/${s.id}/held`, { notes: 'Sandeep to fix the close at Bentleys by Friday', carry_over: [b.id] })).data
+    const r = (await req('POST', `/reports/${s.id}/held`, { notes: 'ignored', carry_over: [b.id] })).data
     expect(r.last_held).toBe(londonToday())
+    expect(r.since).toBe(londonToday())
     expect(r.next_on).toBe(addDays(londonToday(), 14))
     expect(r.prep).toBeNull()
     expect(r.points.map((p: any) => p.id)).toEqual([b.id])
-    expect(r.history[0]).toMatchObject({ notes: 'Sandeep to fix the close at Bentleys by Friday', points: [{ text: 'Three-day close slipping at two clients' }] })
     expect((await one(`SELECT status FROM report_points WHERE id = $1`, [a.id]))!.status).toBe('discussed')
-    expect((await q(`SELECT source, context FROM memory_notes`))[0]).toMatchObject({ source: 'one_to_one', context: { person: 'Sandeep' } })
+    // Still open, so still on the list: not new since last time.
+    expect(r.from_tasks).toEqual([expect.objectContaining({ id: old.id, new_since_last: false })])
+    expect(await q(`SELECT * FROM memory_notes`)).toEqual([])
   })
 
   it('Ask Aimelia can add to a 1-2-1 list by name or area, and read it back', async () => {
@@ -110,6 +126,7 @@ describe('1-2-1 prep', () => {
     expect((await byName('David G')).points.map((p: any) => [p.kind, p.text])).toEqual([['task', 'Dashboard release date']])
     const read = JSON.stringify(calls.filter((c) => c.role === 'chat').at(-1)!.messages)
     expect(read).toContain('Why did the Corrigans renewal slip?')
+    expect(calls.find((c) => c.role === 'chat')!.system).toContain('1-2-1 notes are kept in Employment Hero')
     expect(read).toContain('no direct report matches')
   })
 

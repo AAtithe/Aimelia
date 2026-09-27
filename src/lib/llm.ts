@@ -210,7 +210,7 @@ function mockReply(call: ModelCall): string {
       return out({ reply: `Placeholder reply: no AI key is set on the server, so I cannot read or answer yet.${got} Add the Claude (Anthropic) key in Settings.` })
     }
     case 'one_to_one': {
-      const lines = [...(p.focus_points || []).map((t: string) => `- ${t}`), ...(p.tasks_cropped_up || []).map((t: any) => `- ${t.point}${t.task?.status ? ` (${t.task.status})` : ''}`)]
+      const lines = [...(p.focus_points || []).map((t: string) => `- ${t}`), ...(p.open_tasks || []).map((t: any) => `- ${t.title} (${t.status})`)]
       return `Placeholder prep: no AI key is set, so this is the list as it stands.\n${p.person?.name || ''}, ${p.person?.area || ''}\n${lines.join('\n') || 'Nothing on the list yet.'}`
     }
     case 'triage':

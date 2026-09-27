@@ -463,7 +463,8 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
-  // What to raise at the next 1-2-1: a focus point, or a task that has cropped up (task_id links it to the task list).
+  // What to raise at the next 1-2-1: a focus point, or a task Tom linked (task_id). status 'dismissed' on a task means
+  // it is never picked up for this report automatically. 1-2-1 notes are not kept here: they live in Employment Hero.
   `CREATE TABLE IF NOT EXISTS report_points (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     report_id uuid NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -471,20 +472,9 @@ export const SCHEMA: string[] = [
     text text NOT NULL,
     task_id uuid REFERENCES tasks(id) ON DELETE SET NULL,
     status text NOT NULL DEFAULT 'open',
-    outcome text NOT NULL DEFAULT '',
     source text NOT NULL DEFAULT 'tom',
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     discussed_at timestamptz
   )`,
   `CREATE INDEX IF NOT EXISTS report_points_report_idx ON report_points (report_id, status, created_at)`,
-  // Each 1-2-1 held: Tom's notes and the points it covered, as they stood.
-  `CREATE TABLE IF NOT EXISTS one_to_ones (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    report_id uuid NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
-    held_on text NOT NULL,
-    notes text NOT NULL DEFAULT '',
-    points jsonb NOT NULL DEFAULT '[]'::jsonb,
-    created_at timestamptz NOT NULL DEFAULT now()
-  )`,
-  `CREATE INDEX IF NOT EXISTS one_to_ones_report_idx ON one_to_ones (report_id, held_on DESC)`,
 ]

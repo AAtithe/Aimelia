@@ -163,7 +163,7 @@ export const TOOLS: Record<string, Tool> = {
     },
   },
   one_to_one_prep: {
-    about: 'Tom\'s direct reports and what is on the list for each 1-2-1: focus points, tasks that have cropped up (with where they stand), open tasks that mention them, the last 1-2-1\'s notes and the next date. Leave person empty for all of them',
+    about: 'Tom\'s direct reports and the list for each 1-2-1, built from the task list since the last one: open tasks naming them (flagged when overdue, waiting on Tom, failed or quiet), what they delivered, projects, emails needing action and meetings together, plus Tom\'s focus points and the prep sheet. 1-2-1 notes are kept in Employment Hero, not here. Leave person empty for all of them',
     args: '{"person": "name or area, e.g. James or Commercial; empty for everyone"}',
     run: async (a) => {
       await seedReports()
@@ -172,9 +172,7 @@ export const TOOLS: Record<string, Tool> = {
       if (!rows.length) return who ? `No direct report called ${who}. They are listed on 1-2-1 prep.` : 'No direct reports set up yet.'
       return Promise.all(rows.map(async (r: any) => {
         const v = await reportView(r)
-        return { name: v.name, area: v.area, next_1_2_1: v.next_on, last_1_2_1: v.last_held,
-          points: v.points.map((p) => ({ kind: p.kind, text: p.text, task: p.task ? `${p.task.title} (${p.task.status}${p.task.due_date ? `, due ${p.task.due_date}` : ''})` : null })),
-          cropped_up_not_on_list: v.cropped_up.map((t) => `${t.title} (${t.status})`), last_notes: clip(v.history[0]?.notes, 800) || null, prep_sheet: clip(v.prep, 2500) }
+        return { name: v.name, area: v.area, next_1_2_1: v.next_on, last_1_2_1: v.last_held, list_runs_from: v.since, list: clip(v.agenda, 4000), prep_sheet: clip(v.prep, 2500) }
       }))
     },
   },
