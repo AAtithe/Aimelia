@@ -1,11 +1,18 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Briefing, type Task, dueState } from '@/lib/client/todo'
+import { api, type Briefing, type Question, type Task, dueState } from '@/lib/client/todo'
 import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+
+/** Questions on the same task sit together, in the order the briefing gives them. */
+function byTask(questions: Question[]) {
+  const groups = new Map<string, Question[]>()
+  for (const q of questions) groups.set(q.task_id, [...(groups.get(q.task_id) || []), q])
+  return [...groups.values()]
+}
 
 export default function Today() {
   const { refreshBrief } = useShell()
@@ -63,7 +70,12 @@ export default function Today() {
         <>
           {brief.questions.length > 0 && (
             <div className="card"><h2>Answer these so the team can finish <span className="hcount">{brief.questions.length}</span></h2>
-              {brief.questions.map((q) => <QuestionItem key={q.id} q={q} onDone={load} />)}</div>
+              {byTask(brief.questions).map((g) => g.length === 1 ? <QuestionItem key={g[0].id} q={g[0]} onDone={load} /> : (
+                <div key={g[0].task_id} className="qgroup">
+                  <div className="qgroup-h"><span className="tag">{g[0].task_title}</span><span className="cap">{g.length} questions on this task</span></div>
+                  {g.map((q) => <QuestionItem key={q.id} q={q} onDone={load} showTask={false} />)}
+                </div>
+              ))}</div>
           )}
           {brief.follow_ups.length > 0 && (
             <div className="card"><h2>Delegated work due back <span className="hcount">{brief.follow_ups.length}</span></h2>

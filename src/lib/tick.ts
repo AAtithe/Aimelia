@@ -1,6 +1,7 @@
 /** One background cycle. Each step is isolated so one failure never stops the rest. */
 import { getPipeline, processQueue, releaseStale, seedDefaults } from './agents/orchestrator'
 import { createDueRoutines, nudgeStale, wakeScheduled } from './agents/schedule'
+import { tidyQuestions } from './agents/questions'
 import { maybeSendMorning } from './agents/notify'
 import { runImportJobs } from './agents/imports'
 import { learnFromNotes, weeklyCheck, weeklyCheckDue } from './memory/learn'
@@ -32,6 +33,8 @@ export async function tick(now: Date = new Date()) {
   if (Date.now() - started < 40_000 && (await weeklyCheckDue(now))) await safe('memory_check', async () => (await weeklyCheck('weekly', now))?.status)
   const pipeline = await getPipeline()
   await safe('stale', () => nudgeStale(pipeline.stale_days, now))
+  // Repeats merged, out-of-date questions reworded, ones Tom has already answered settled; before the agents run, so they pick up what it frees.
+  if (Date.now() - started < 120_000) await safe('questions', () => tidyQuestions())
   // A long read above leaves less of the five minutes for the agents.
   const left = 260_000 - (Date.now() - started)
   if (pipeline.auto_run && left > 20_000) await safe('processed', () => processQueue({ limit: 20, budgetMs: Math.min(200_000, left - 20_000) }))

@@ -5,6 +5,7 @@
 import { json, one, q, type Row } from '../db'
 import { addDays, addMonths, isYmd, londonToday, monthDay, ukDate, weekday, type Ymd } from '../dates'
 import { logEvent } from './orchestrator'
+import { releaseTaskQuestions } from './questions'
 
 export const CADENCES = ['weekly', 'fortnightly', 'monthly', 'quarterly'] as const
 export type Cadence = (typeof CADENCES)[number]
@@ -97,7 +98,7 @@ export async function nudgeStale(staleDays: number, now: Date = new Date()): Pro
     await logEvent(r.id, 'feedback', 'aimelia', { text:
       `This task has sat untouched for ${days} days. Treat that as evidence it is not Tom's to do. ` +
       'Triage: the verdict must be DELEGATE or DROP unless there is a hard reason only Tom can do it, and say that reason.' })
-    await q(`UPDATE questions SET status = 'dismissed' WHERE task_id = $1 AND status = 'open'`, [r.id])
+    await releaseTaskQuestions(r.id)
     await q(`UPDATE tasks SET status = 'queued', stale_nudged_at = $2 WHERE id = $1`, [r.id, now.toISOString()])
   }
   return rows.length

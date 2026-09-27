@@ -26,7 +26,9 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
       const res = dismiss
         ? await api(`/questions/${q.id}/dismiss`, { method: 'POST' })
         : await api(`/questions/${q.id}/answer`, { method: 'POST', body: { answer } })
-      setMsg({ ok: true, text: res.task_resumed ? 'Answered. The team has picked it back up.' : 'Answered. Other questions on this task are still open.' })
+      const n = res.tasks_resumed || 0
+      setMsg({ ok: true, text: dismiss ? (n ? 'Skipped. The team will use its judgement.' : 'Skipped.')
+        : n > 1 ? `Answered. ${n} tasks have gone back to the team.` : res.task_resumed || n ? 'Answered. The team has picked it back up.' : 'Answered. Other questions on this task are still open.' })
       setTimeout(onDone, 900)
     } catch (e: any) {
       setMsg({ ok: false, text: e.message })
@@ -39,10 +41,20 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
     <div className="item">
       <div className="o">
         {showTask && <span className="tag">{q.task_title}</span>}
+        {(q.also_for || []).map((t) => <span key={t.task_id} className="tag">{t.title}</span>)}
         <span>Asked by {q.asked_by}</span>
+        {q.updated_at && <span className="chip">Updated by Aimelia</span>}
       </div>
       <div className="t">{q.question}</div>
       {q.why && <div className="meta">Why it matters: {q.why}</div>}
+      {q.shared_with && <div className="meta">Shared with {q.shared_with.title}. One answer settles both.</div>}
+      {!!q.also_for?.length && <div className="meta">One answer settles this for {q.also_for.length + 1} tasks.</div>}
+      {q.suggested_answer && (
+        <div className="note info" style={{ margin: '8px 0 0' }}>
+          Suggested from what you said before{q.suggested_from ? ` (${q.suggested_from})` : ''}: {q.suggested_answer}
+          <div className="toolbar"><button className="btn" disabled={busy} onClick={() => setAnswer(q.suggested_answer!)}>Use this answer</button></div>
+        </div>
+      )}
       <textarea className="inp" style={{ marginTop: 8 }} rows={2} placeholder="Your answer" value={answer}
         aria-label="Your answer" onChange={(e) => setAnswer(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && answer.trim()) submit() }} />
