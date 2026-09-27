@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, Task, PRIORITY_LABEL, dueState, fmtDate } from '@/lib/client/todo'
 import { StatusPill, VoiceButton } from './Cards'
 
@@ -42,7 +42,13 @@ export function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: strin
   )
 }
 
-export function BrainDump({ onAdded }: { onAdded: () => void }) {
+/**
+ * The type bar pinned to the bottom of the page. Type or dictate and press Enter: every line
+ * becomes a task and Triage takes it from there. "More" opens the full panel above the bar,
+ * for a single task with a brief, priority and due date. Esc closes the panel.
+ */
+export function CaptureBar({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<'dump' | 'one'>('dump')
   const [text, setText] = useState('')
   const [title, setTitle] = useState('')
@@ -50,19 +56,39 @@ export function BrainDump({ onAdded }: { onAdded: () => void }) {
   const [due, setDue] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const box = useRef<HTMLTextAreaElement>(null)
+
+  // Grow the box with what is typed, up to about six lines, then scroll.
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 150)}px`
+  }, [text, open, mode])
+
+  useEffect(() => {
+    if (!msg?.ok) return
+    const t = setTimeout(() => setMsg(null), 7000)
+    return () => clearTimeout(t)
+  }, [msg])
+
+  const one = open && mode === 'one'
+  const ready = one ? !!title.trim() : !!text.trim()
 
   const submit = async () => {
+    if (!ready || busy) return
     setBusy(true)
     setMsg(null)
     try {
-      if (mode === 'dump') {
-        const made = await api<Task[]>('/capture', { method: 'POST', body: { text } })
-        setMsg({ ok: true, text: `Split into ${made.length} task${made.length === 1 ? '' : 's'}: ${made.map((t) => t.title).join('; ')}. The team is on them.` })
-        setText('')
-      } else {
+      if (one) {
         await api('/tasks', { method: 'POST', body: { title, notes: text, priority, due_date: due || null } })
         setMsg({ ok: true, text: 'Added. The team is on it.' })
         setTitle(''); setText(''); setDue(''); setPriority(2)
+      } else {
+        const made = await api<Task[]>('/capture', { method: 'POST', body: { text } })
+        setMsg({ ok: true, text: made.length === 1 ? `Added "${made[0].title}". The team is on it.`
+          : `Split into ${made.length} tasks: ${made.map((t) => t.title).join('; ')}. The team is on them.` })
+        setText('')
       }
       onAdded()
     } catch (e: any) {
@@ -72,52 +98,62 @@ export function BrainDump({ onAdded }: { onAdded: () => void }) {
     }
   }
 
-  const ready = mode === 'dump' ? !!text.trim() : !!title.trim()
+  const keys = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') setOpen(false)
+    else if (e.key === 'Enter' && !e.shiftKey && !one) { e.preventDefault(); submit() }
+  }
 
   return (
-    <div className="card">
-      <h2>Give the team your list</h2>
-      <div className="body">
-        <div className="main-tabs" style={{ marginBottom: 10 }}>
-          <button className={`main-tab-btn ${mode === 'dump' ? 'active' : ''}`} onClick={() => setMode('dump')}>Brain dump</button>
-          <button className={`main-tab-btn ${mode === 'one' ? 'active' : ''}`} onClick={() => setMode('one')}>One task</button>
-        </div>
-        {mode === 'dump' ? (
-          <>
-            <p className="cap">Paste or dictate everything on your mind, as messy as it comes. It is split into separate tasks, and Triage decides which ones you do, delegate, defer or drop.
-              For Microsoft To Do, Word documents, meeting notes or Fireflies, use <Link href="/import">Import tasks</Link>.</p>
-            <textarea className="inp" rows={5} value={text} onChange={(e) => setText(e.target.value)} aria-label="Brain dump"
-              placeholder={'Chase Corrigans for Q3 tronc sign-off before Friday\nBentleys want to talk about labour %, book a call\nReview Sam\'s pay rise case\nPrice for the new Soho group, 6 sites'} />
-          </>
-        ) : (
-          <>
-            <label className="fld"><span>Task</span>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chase Corrigans for Q3 tronc sign-off"
-                onKeyDown={(e) => e.key === 'Enter' && title.trim() && !busy && submit()} />
-            </label>
-            <label className="fld"><span>Brief: context, people, numbers, what good looks like. More detail means fewer questions.</span>
-              <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} />
-            </label>
-            <div className="row2">
-              <label className="fld"><span>Priority</span>
-                <select value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
-                  <option value={1}>High</option><option value={2}>Normal</option><option value={3}>Low</option>
-                </select>
-              </label>
-              <label className="fld"><span>Due</span>
-                <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-              </label>
-            </div>
-          </>
+    <>
+      <div className="capbar-space" aria-hidden />
+      <div className={`capbar ${open ? 'open' : ''}`} role="region" aria-label="Give the team your list" onKeyDown={keys}>
+        {msg && (
+          <div className={`capbar-msg ${msg.ok ? 'ok' : 'err'}`} role="status">
+            <span>{msg.text}</span>
+            <button type="button" className="capbar-x" onClick={() => setMsg(null)} aria-label="Dismiss">x</button>
+          </div>
         )}
-        <div className="toolbar">
-          <button className="btn primary" disabled={busy || !ready} onClick={submit}>
-            {busy ? 'Sending ...' : mode === 'dump' ? 'Split and hand to the team' : 'Hand to the team'}
-          </button>
+        {open && (
+          <div className="capbar-panel">
+            <div className="capbar-head">
+              <div className="main-tabs">
+                <button className={`main-tab-btn ${mode === 'dump' ? 'active' : ''}`} onClick={() => setMode('dump')}>Brain dump</button>
+                <button className={`main-tab-btn ${mode === 'one' ? 'active' : ''}`} onClick={() => setMode('one')}>One task</button>
+              </div>
+              <button type="button" className="capbar-x" onClick={() => setOpen(false)} aria-label="Close the panel">x</button>
+            </div>
+            {mode === 'dump' ? (
+              <p className="cap">Everything on your mind, as messy as it comes, one thing per line. It is split into separate tasks, and Triage decides which ones you do, delegate, defer or drop.
+                For Microsoft To Do, Word documents, meeting notes or Fireflies, use <Link href="/import">Import tasks</Link>.</p>
+            ) : (
+              <>
+                <label className="fld"><span>Task</span>
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chase Corrigans for Q3 tronc sign-off" autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }} />
+                </label>
+                <div className="row2">
+                  <label className="fld"><span>Priority</span>
+                    <select value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
+                      <option value={1}>High</option><option value={2}>Normal</option><option value={3}>Low</option>
+                    </select>
+                  </label>
+                  <label className="fld"><span>Due</span>
+                    <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <div className="capbar-row">
+          <textarea ref={box} rows={1} title="Enter sends. Shift+Enter starts a new line, and each line becomes its own task." value={text} onChange={(e) => setText(e.target.value)}
+            aria-label={one ? 'Brief' : 'Give the team your list'}
+            placeholder={one ? 'Brief: context, people, numbers, what good looks like' : 'Give the team your list ...'} />
           <VoiceButton onText={(said) => setText((prev) => (prev ? `${prev.replace(/\s+$/, '')}\n${said}` : said))} />
+          <button type="button" className="btn" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? 'Less' : 'More'}</button>
+          <button type="button" className="btn primary" disabled={busy || !ready} onClick={submit}>{busy ? 'Sending ...' : 'Send'}</button>
         </div>
-        <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`}>{msg?.text}</div>
       </div>
-    </div>
+    </>
   )
 }

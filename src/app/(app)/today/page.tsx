@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type Briefing, type Task, dueState } from '@/lib/client/todo'
 import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
-import { BrainDump, TaskTable } from '@/components/tasks/Shared'
+import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
 
 export default function Today() {
@@ -61,7 +61,6 @@ export default function Today() {
       {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
-          <BrainDump onAdded={load} />
           {brief.questions.length > 0 && (
             <div className="card"><h2>Answer these so the team can finish <span className="hcount">{brief.questions.length}</span></h2>
               {brief.questions.map((q) => <QuestionItem key={q.id} q={q} onDone={load} />)}</div>
@@ -79,10 +78,11 @@ export default function Today() {
               <TaskTable tasks={brief.failed} onOpen={setOpenTask} /></div>
           )}
           {waiting === 0 && brief.failed.length === 0 && (
-            <div className="note info"><b>Nothing is waiting for you.</b> {working ? `The team is working on ${working} task${working === 1 ? '' : 's'}; results appear here once they are checked.` : 'Add to the list above and the team will start.'}</div>
+            <div className="note info"><b>Nothing is waiting for you.</b> {working ? `The team is working on ${working} task${working === 1 ? '' : 's'}; results appear here once they are checked.` : 'Type into the bar at the bottom and the team will start.'}</div>
           )}
         </>
       )}
+      <CaptureBar onAdded={load} />
       {openTask && <TaskDetail taskId={openTask} onClose={() => { setOpenTask(null); load() }} onChanged={load} />}
     </Shell>
   )

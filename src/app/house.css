@@ -131,6 +131,27 @@
 .ws .chat-chip .sz{color:var(--muted)}
 .ws .chatfab{position:fixed;right:22px;bottom:22px;z-index:40;box-shadow:var(--shadowUp);border-radius:22px;padding:10px 18px}
 
+/* --- the type bar: pinned to the bottom centre of the content, the panel opens above it --- */
+.ws .capbar-space{height:120px}
+.ws .capbar{position:fixed;bottom:18px;left:calc(50% + 114px);transform:translateX(-50%);width:min(760px,calc(100vw - 228px - 40px));z-index:45;display:flex;flex-direction:column;gap:8px}
+.ws .capbar-row{display:flex;gap:8px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:var(--shadowUp)}
+.ws .capbar-row:focus-within{border-color:var(--wsblue);box-shadow:var(--shadowUp),var(--focus)}
+.ws .capbar-row textarea{flex:1 1 0;min-width:0;min-height:36px;max-height:150px;resize:none;border:0;box-shadow:none;outline:0;padding:8px 6px;font:inherit;font-size:14px;line-height:1.4;background:transparent}
+.ws .capbar-row{flex-wrap:wrap}
+.ws .capbar-row .msg{order:9;flex-basis:100%;margin:0 6px 4px}
+.ws .capbar-panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px 4px;box-shadow:var(--shadowUp);max-height:55vh;overflow-y:auto}
+.ws .capbar-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}
+.ws .capbar-panel .cap{margin:0 0 10px}
+.ws .capbar-msg{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;font-size:13px;border-radius:10px;padding:9px 12px;box-shadow:var(--shadowUp);border:1px solid var(--line);background:#fff;color:var(--ink)}
+.ws .capbar-msg.ok{background:var(--goodbg);border-color:var(--goodbg);color:var(--greenT)}
+.ws .capbar-msg.err{background:var(--badbg);border-color:var(--badline);color:var(--redT)}
+.ws .capbar-x{font:inherit;font-size:13px;line-height:1;background:none;border:0;color:var(--muted);cursor:pointer;padding:4px 6px;border-radius:6px}
+.ws .capbar-x:hover{background:var(--hover);color:var(--navy)}
+/* Lift Ask Aimelia clear of the bar wherever the two would meet. */
+@media(max-width:1280px){
+  .ws:has(.capbar) .chatfab{bottom:92px}
+}
+
 @media(max-width:700px){
   .ws header .who{margin-left:0}
   .ws .agent{flex-wrap:wrap}
@@ -144,4 +165,5 @@
   .ws .navbtn{display:inline-block}
   .ws .chatgrid{grid-template-columns:1fr}
   .ws .chat-msg{max-width:100%}
+  .ws .capbar{left:50%;width:calc(100vw - 24px);bottom:10px}
 }
