@@ -176,3 +176,30 @@ export async function keepEarlierNotes(): Promise<number | null> {
     ON CONFLICT (source, ref) DO NOTHING RETURNING id`)
   return added.length
 }
+
+/**
+ * For Ask Aimelia's instructions: what Tom has set himself (checked by him) and his standing preferences, then the
+ * memories that bear on his message. With ids, so it can forget one when he says it is wrong.
+ */
+export async function rememberedFor(message: string, limit = 80): Promise<{ id: string; fact: string }[]> {
+  const standing = await q(`SELECT * FROM memories WHERE status = 'active' AND (pinned OR kind IN ('preference', 'process'))
+                            ORDER BY updated_at DESC LIMIT $1`, [limit - 20])
+  const related = await relatedMemories(message, 20)
+  const seen = new Set<string>()
+  return [...standing, ...related].filter((m) => !seen.has(m.id) && seen.add(m.id))
+    .map((m) => ({ id: m.id, fact: m.subject ? `${m.subject}: ${m.content}` : m.content }))
+}
+
+/**
+ * Ask Aimelia first kept remembered facts in chat_memory. They now live here with everything else: moved across,
+ * marked as Tom's (he asked for each one), with their original date. Cheap when there is nothing to move.
+ */
+export async function moveChatMemory(): Promise<number> {
+  const moved = await q(`WITH gone AS (DELETE FROM chat_memory RETURNING fact, created_at)
+    INSERT INTO memories (kind, content, pinned, created_by, sources, created_at, updated_at)
+    SELECT 'fact', left(fact, 1000), true, 'tom',
+      jsonb_build_array(jsonb_build_object('source', 'chat', 'label', 'You told Ask Aimelia', 'quote', left(fact, 300), 'at', created_at)), created_at, created_at
+    FROM gone RETURNING *`)
+  for (const m of moved) await logChange(m.id, 'added', 'tom', null, m, 'Moved from Ask Aimelia\'s earlier memory')
+  return moved.length
+}

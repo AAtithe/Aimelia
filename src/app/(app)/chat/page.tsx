@@ -11,9 +11,10 @@ type Tool = { name: string; does: string }
 export default function AskAimelia() {
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [tools, setTools] = useState<Tool[]>([])
+  const [model, setModel] = useState('')
   const [current, setCurrent] = useState<string | null>(null)
 
-  const load = () => chat<{ chats: ChatSummary[]; tools: Tool[] }>('/chats').then((r) => { setChats(r.chats); setTools(r.tools) }).catch(() => {})
+  const load = () => chat<{ chats: ChatSummary[]; tools: Tool[]; model: string }>('/chats').then((r) => { setChats(r.chats); setTools(r.tools); setModel(r.model) }).catch(() => {})
   useEffect(() => {
     load()
     const c = new URLSearchParams(window.location.search).get('c')
@@ -27,7 +28,7 @@ export default function AskAimelia() {
   }
 
   return (
-    <Shell title="Ask Aimelia" sub="A chat agent over your work: it looks up tasks, email, diary, the knowledge base and client figures before it answers, and adds tasks when you ask."
+    <Shell title="Ask Aimelia" sub="A chat agent over your work: it looks things up, works out the figures, searches the web, drafts in Outlook and adds tasks, and remembers what you tell it. It never sends anything."
       actions={<button className="btn" onClick={() => setCurrent(null)}>New conversation</button>}>
       <div className="chatgrid">
         <div className="card chatlist"><h2>Conversations</h2>
@@ -41,7 +42,7 @@ export default function AskAimelia() {
             </div>
           ))}
           {tools.length > 0 && (
-            <div className="body"><p className="cap">What it can use now:</p>
+            <div className="body"><p className="cap">{model === 'mock' ? 'No AI key yet, so answers are placeholders. ' : model ? `Runs on ${model}. ` : ''}What it can use now:</p>
               <ul className="chat-tools">{tools.map((t) => <li key={t.name}>{t.does}</li>)}</ul></div>
           )}
         </div>

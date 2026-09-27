@@ -305,6 +305,12 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
   )`,
   `CREATE INDEX IF NOT EXISTS chat_files_message_idx ON chat_files (message_id)`,
+  // What Tom tells Ask Aimelia to remember, carried into every conversation.
+  `CREATE TABLE IF NOT EXISTS chat_memory (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    fact text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  )`,
   // ---------------------------------------------------------------- memory: what Aimelia knows
   // Everything Tom tells Aimelia, word for word. Never removed when a task is; only Tom can delete a note.
   `CREATE TABLE IF NOT EXISTS memory_notes (

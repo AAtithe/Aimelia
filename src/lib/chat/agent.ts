@@ -2,41 +2,62 @@
  * Ask Aimelia: a chat agent Tom can talk to about his work.
  *
  * Each turn the model sees the conversation and a fixed list of tools, and answers with one JSON
- * object: either tool calls to make, or the reply for Tom. Tools run here, their results go back
- * to the model, and the loop repeats up to MAX_STEPS times. The protocol is plain JSON rather than
- * a provider's native tool use, so it works the same with Claude, OpenAI and the mock.
+ * object: either tool calls to make, or the reply for Tom. Tools run here (the calls in one step
+ * run together), their results go back to the model, and the loop repeats up to MAX_STEPS times or
+ * until the time budget is spent, when it must reply. The protocol is plain JSON rather than a
+ * provider's native tool use, so it works the same with Claude, OpenAI and the mock.
+ *
+ * With the Claude key it runs on the most capable model (CHAT_MODEL overrides it) at high effort,
+ * with server-side fallback if that model declines. Web search runs on Claude Opus 5, which the
+ * current web search tool supports.
  *
  * Tom can attach photos, PDFs and documents to a message (see files.ts). Photos and PDFs go to the model
  * as they are, for the last few messages only; documents go as their text.
  *
- * Every tool reads, except create_task, answer_question, add_to_knowledge and remember, which do exactly what the
- * matching buttons do. Nothing is ever sent: email stays as drafts made elsewhere, and the calendar is only read.
+ * Most tools read. The ones that change things (tasks, questions, the knowledge base, memory, Outlook
+ * drafts, focus time) do what the matching buttons do, and only when Tom asks. Nothing is ever sent:
+ * email is only ever a draft in Outlook for Tom to send himself.
  */
 import { iso, one, q } from '../db'
-import { complete, parseJson, type Attachment, type Message } from '../llm'
+import { env } from '../env'
+import { complete, LLMError, parseJson, resolveModel, resolveProvider, type Attachment, type Message } from '../llm'
 import { londonParts } from '../dates'
 import { runLater } from '../router'
 import { index, search } from '../email/knowledge'
-import { upcomingEvents } from '../email/briefs'
-import { connection } from '../microsoft'
+import { briefForEvent, upcomingEvents } from '../email/briefs'
+import { addressOf, getMessage, type GraphMessage } from '../email/mail'
+import { createDraft, createReplyDraft } from '../email/drafting'
+import { connection, graph } from '../microsoft'
+import { bookFocus } from '../agents/calendarBlocks'
 import { resumeIfAnswered } from '../agents/api'
 import { getPipeline, logEvent, processQueue, seedDefaults } from '../agents/orchestrator'
 import { touch } from '../agents/schedule'
 import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources'
-import { addMemory, keepNote, memoryForContext } from '../memory/store'
+import { addMemory, changeMemory, getMemory, keepNote, memoryForContext, moveChatMemory, rememberedFor } from '../memory/store'
+import { calculate } from './calc'
 
-export const MAX_STEPS = 6
-const MAX_CALLS = 4
+export const MAX_STEPS = 10
+const MAX_CALLS = 6
+export const CHAT_MODEL = 'claude-fable-5-1' // the most capable widely released Claude model
+const WEB_MODEL = 'claude-opus-5' // runs the current web search tool
+const FALLBACK_MODEL = 'claude-opus-5' // if this account cannot use CHAT_MODEL (access, data retention)
+const BUDGET_MS = 230_000 // after this the agent must reply, inside Vercel's 300 seconds
+const HARD_STOP_MS = 285_000 // no single model call may run past this
+let chatModelRefused = false // remembered for the life of the server, so only the first chat pays for finding out
 const HISTORY = 20
 const FILES_IN_VIEW = 6 // photos and PDFs are sent again only for this many most recent messages
 const MAX_DOC_TEXT = 30_000
-const MAX_RESULT = 6000
+const MAX_RESULT = 12_000
 const clip = (t: unknown, n = 400) => { const s = String(t ?? ''); return s.length <= n ? s : `${s.slice(0, n)} ...` }
 
 export type Turn = { role: string; content: string; files?: { name: string; kind: string; media_type: string; data: string | null; text: string | null }[] }
 export type Step = { tool: string; args: Record<string, unknown>; ok: boolean; note: string }
 type Args = Record<string, any>
 type Tool = { about: string; args: string; available?: () => Promise<boolean> | boolean; run: (a: Args) => Promise<unknown> }
+
+const microsoftLive = async () => (await connection().catch(() => ({ connected: false }))).connected
+const mailLine = (m: GraphMessage) => ({ id: m.id, subject: m.subject, from: addressOf(m), from_name: m.from?.emailAddress?.name || '',
+  received: m.receivedDateTime, read: m.isRead, preview: clip(m.bodyPreview, 250) })
 
 const TASK_COLS = `id, title, status, priority, due_date, summary, source`
 const taskLine = (t: any) => ({ id: t.id, title: t.title, status: t.status, priority: t.priority, due_date: t.due_date, summary: clip(t.summary, 300), source: t.source ?? null })
@@ -119,15 +140,6 @@ export const TOOLS: Record<string, Tool> = {
     args: '{"query": "words to search for"}',
     run: async (a) => memoryForContext(String(a.query || ''), 12),
   },
-  remember: {
-    about: 'Keep a fact or preference in Aimelia\'s memory, as Tom states it. Only when Tom asks you to remember or correct something. It shows on What Aimelia knows, where he can change it',
-    args: '{"subject": "who or what it is about", "content": "one plain statement", "kind": "fact|preference|person|client|process"}',
-    run: async (a) => {
-      const m = await addMemory({ kind: a.kind, subject: String(a.subject || ''), content: String(a.content || ''),
-        sources: [{ source: 'chat', label: 'You told Ask Aimelia', quote: String(a.content || '').slice(0, 300), at: new Date().toISOString() }] }, 'tom', 'Added from Ask Aimelia')
-      return m ? { remembered: true, subject: m.subject, content: m.content } : 'Not kept: it needs the statement to remember.'
-    },
-  },
   search_knowledge: {
     about: 'Search the knowledge base: sorted emails, meeting briefs, and documents and policies Tom has added',
     args: '{"query": "words to search for"}',
@@ -162,13 +174,141 @@ export const TOOLS: Record<string, Tool> = {
   upcoming_meetings: {
     about: 'Tom\'s calendar for the next N hours (read only), with whether a brief is ready',
     args: '{"hours": 24}',
-    available: async () => (await connection().catch(() => ({ connected: false }))).connected,
+    available: microsoftLive,
     run: async (a) => {
       const hours = Math.min(Math.max(Number(a.hours) || 24, 1), 24 * 14)
       const events = (await upcomingEvents(hours, 25)).filter((e) => !e.isAllDay)
       const briefed = new Set((await q(`SELECT graph_event_id FROM meetings WHERE brief IS NOT NULL AND graph_event_id = ANY($1::text[])`, [events.map((e) => e.id)])).map((r) => r.graph_event_id))
-      return events.map((e) => ({ subject: e.subject, start: e.start?.dateTime, end: e.end?.dateTime, location: e.location?.displayName || '',
+      return events.map((e) => ({ id: e.id, subject: e.subject, start: e.start?.dateTime, end: e.end?.dateTime, location: e.location?.displayName || '',
         online: !!e.isOnlineMeeting, attendees: (e.attendees || []).map((x) => x.emailAddress?.name || x.emailAddress?.address).filter(Boolean).slice(0, 12), brief_ready: briefed.has(e.id) }))
+    },
+  },
+  update_task: {
+    about: 'Change a task when Tom asks: title, notes (replace, or add a line with append_note), priority, due date, or status done (close it) or queued (send it back to the agents)',
+    args: '{"id": "task id", "title": "optional", "notes": "optional", "append_note": "optional", "priority": 1|2|3, "due_date": "YYYY-MM-DD or null", "status": "done|queued"}',
+    run: async (a) => {
+      const t = await one(`SELECT * FROM tasks WHERE id::text = $1`, [String(a.id || '')])
+      if (!t) return 'No task with that id.'
+      if (a.status === 'queued' && t.status === 'processing') return 'The agents are working on it right now; try again in a minute.'
+      const set: Record<string, unknown> = {}
+      if (typeof a.title === 'string' && a.title.trim()) set.title = a.title.trim().slice(0, 500)
+      if (typeof a.notes === 'string') set.notes = a.notes
+      if (typeof a.append_note === 'string' && a.append_note.trim()) set.notes = `${set.notes ?? t.notes}${(set.notes ?? t.notes) ? '\n' : ''}${a.append_note.trim()}`
+      if ([1, 2, 3].includes(Number(a.priority))) set.priority = Number(a.priority)
+      if (a.due_date === null || /^\d{4}-\d{2}-\d{2}$/.test(String(a.due_date || ''))) if ('due_date' in a) set.due_date = a.due_date
+      if (a.status === 'done' || a.status === 'queued') set.status = a.status
+      const keys = Object.keys(set)
+      if (!keys.length) return 'Nothing to change.'
+      await q(`UPDATE tasks SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`, [t.id, ...keys.map((k) => set[k])])
+      await touch(t.id)
+      await logEvent(t.id, 'edit', 'tom', { via: 'chat', changed: keys, ...(set.status ? { status: set.status } : {}) })
+      if (set.status === 'queued') runLater(() => processQueue({ limit: 5 }))
+      return { updated: true, id: t.id, title: set.title ?? t.title, changed: keys }
+    },
+  },
+  calculate: {
+    about: 'Exact arithmetic. Use it for every sum you give Tom: VAT, margins, labour %, variances, growth, splits. Separate function arguments with ;',
+    args: '{"sums": {"label": "expression, e.g. 12500 * 20% or round(4350 / 18200 * 100; 1)"}}',
+    run: async (a) => {
+      const sums = a.sums && typeof a.sums === 'object' ? a.sums : { result: a.expression }
+      const out: Record<string, unknown> = {}
+      for (const [label, e] of Object.entries(sums).slice(0, 30)) {
+        try { out[label] = calculate(String(e)) } catch (err) { out[label] = `error: ${(err as Error).message}` }
+      }
+      return out
+    },
+  },
+  web_search: {
+    about: 'Search the web for current outside facts: HMRC rates and thresholds, legislation and guidance, news on a client or supplier, market data. Returns an answer with its sources',
+    args: '{"query": "what to find out, as a full question"}',
+    available: () => !!env.anthropicKey(),
+    run: async (a) => complete({ provider: 'anthropic', model: WEB_MODEL, role: 'web', webSearch: 5, maxTokens: 4000, effort: 'medium',
+      system: 'You research questions for a UK hospitality accountancy firm. Search the web, prefer primary sources (gov.uk, HMRC, legislation.gov.uk, company filings), give the facts with figures and dates exactly as published, say when sources disagree or are out of date, and keep it brief. UK English.',
+      messages: [{ role: 'user', content: String(a.query || '') }], payload: a }),
+  },
+  remember: {
+    about: 'Keep a fact or preference for every future conversation and for the agent team, when Tom says to remember something (who someone is, how he likes things, standing instructions). It goes on What Aimelia knows, marked as checked by Tom',
+    args: '{"fact": "one plain statement, standing on its own", "subject": "who or what it is about", "kind": "fact|preference|person|client|process"}',
+    run: async (a) => {
+      const fact = String(a.fact || a.content || '').trim()
+      if (!fact) return 'Nothing to remember.'
+      const m = (await addMemory({ kind: a.kind, subject: String(a.subject || ''), content: fact,
+        sources: [{ source: 'chat', label: 'You told Ask Aimelia', quote: fact.slice(0, 300), at: new Date().toISOString() }] }, 'tom', 'Added from Ask Aimelia'))!
+      return { remembered: true, id: m.id, fact: m.content }
+    },
+  },
+  forget: {
+    about: 'Drop a remembered fact when Tom says it is wrong or no longer applies. It is archived on What Aimelia knows, where he can bring it back',
+    args: '{"id": "memory id from what you remember"}',
+    run: async (a) => {
+      const m = await getMemory(String(a.id || ''))
+      if (!m || m.status !== 'active') return 'No memory with that id.'
+      await changeMemory(m.id, { status: 'archived' }, 'tom', 'Forgotten in Ask Aimelia')
+      return { forgotten: true, fact: m.content }
+    },
+  },
+  search_conversations: {
+    about: 'Search earlier Ask Aimelia conversations for what was said before',
+    args: '{"query": "words to find"}',
+    run: async (a) => {
+      const words = String(a.query || '').trim()
+      if (!words) return 'Give some words to search for.'
+      const rows = await q(`SELECT c.title, m.role, m.content, m.created_at FROM chat_messages m JOIN chats c ON c.id = m.chat_id
+        WHERE m.content ILIKE '%' || $1 || '%' ORDER BY m.created_at DESC LIMIT 10`, [words])
+      return rows.map((r) => ({ conversation: r.title, who: r.role === 'user' ? 'Tom' : 'Aimelia', when: iso(r.created_at), text: clip(r.content, 500) }))
+    },
+  },
+  search_email: {
+    about: 'Search Tom\'s whole mailbox in Outlook (not just what triage sorted): by person, company, subject or words',
+    args: '{"query": "e.g. from:mandy@... or Bentleys payroll", "limit": 10}',
+    available: microsoftLive,
+    run: async (a) => {
+      const query = String(a.query || '').replace(/"/g, '').trim()
+      if (!query) return 'Give something to search for.'
+      const res = await graph<{ value: GraphMessage[] }>('GET', '/me/messages', { query: { $search: `"${query}"`, $top: Math.min(Math.max(Number(a.limit) || 10, 1), 25),
+        $select: 'id,subject,from,receivedDateTime,bodyPreview,isRead,conversationId' } })
+      return (res.value || []).map(mailLine)
+    },
+  },
+  read_email: {
+    about: 'Read one email in full: sender, recipients, date and the whole body',
+    args: '{"id": "message id from search_email"}',
+    available: microsoftLive,
+    run: async (a) => {
+      const m = await getMessage(String(a.id || ''))
+      return { ...mailLine(m), cc: (m.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean), body: clip(m.body?.content, 8000) }
+    },
+  },
+  draft_email: {
+    about: 'Save an email as a draft in Tom\'s Outlook, never sent: a threaded reply (reply_to_id) or a new email (to, subject). Only when Tom asks. Write it in his voice and sign off "Best regards,\\nTom"',
+    args: '{"reply_to_id": "message id, for a reply", "to": "address(es), for a new email", "subject": "for a new email", "body": "the full text"}',
+    available: microsoftLive,
+    run: async (a) => {
+      const text = String(a.body || '').trim()
+      if (!text) return 'Not drafted: the body is empty.'
+      if (a.reply_to_id) {
+        const d = await createReplyDraft(String(a.reply_to_id), text)
+        return { drafted: true, sent: false, reply: true, subject: d.subject, link: d.link }
+      }
+      if (!a.to || !a.subject) return 'Not drafted: a new email needs to and subject.'
+      const d = await createDraft(String(a.to), String(a.subject), text)
+      return { drafted: true, sent: false, to: a.to, subject: a.subject, link: d.link }
+    },
+  },
+  meeting_brief: {
+    about: 'Write or refresh the brief for a meeting, from the invite and recent emails with the attendees. style: brief (short) or prep (six sections)',
+    args: '{"event_id": "id from upcoming_meetings", "style": "brief|prep"}',
+    available: microsoftLive,
+    run: async (a) => briefForEvent(String(a.event_id || ''), a.style === 'brief' ? 'brief' : 'prep'),
+  },
+  book_focus_time: {
+    about: 'Block focus time in Tom\'s calendar in the first free slot in working hours, when Tom asks',
+    args: '{"title": "what the time is for", "minutes": 60}',
+    available: microsoftLive,
+    run: async (a) => {
+      const p = await getPipeline()
+      const minutes = Math.min(Math.max(Number(a.minutes) || p.focus_minutes || 60, 15), 480)
+      return bookFocus({ title: String(a.title || 'Focus time'), summary: 'Booked by Ask Aimelia', minutes, workStart: p.work_start, workEnd: p.work_end })
     },
   },
   ws_lookup: {
@@ -182,6 +322,13 @@ export const TOOLS: Record<string, Tool> = {
   },
 }
 
+/** The model the chat runs on now, for the screen. */
+export function chatModel() {
+  const provider = resolveProvider('auto')
+  return provider === 'anthropic' ? env.chatModel() || (chatModelRefused ? FALLBACK_MODEL : CHAT_MODEL) : resolveModel(provider)
+}
+export const resetChatModel = () => { chatModelRefused = false }
+
 /** The tools that can run right now (the calendar needs Microsoft 365, lookups need WSCIP or PCC). */
 export async function availableTools(): Promise<string[]> {
   const out: string[] = []
@@ -189,37 +336,45 @@ export async function availableTools(): Promise<string[]> {
   return out
 }
 
-function systemPrompt(houseRules: string, tools: string[]) {
+function systemPrompt(p: { house_rules: string; team_directory: string }, tools: string[], memory: { id: string; fact: string }[]) {
   const now = londonParts()
   const live = Object.entries(configuredSources()).filter(([, ok]) => ok).map(([s]) => s as keyof typeof CATALOGUE)
   const catalogue = tools.includes('ws_lookup') ? Object.fromEntries(live.map((s) => [s, {
     system: CATALOGUE[s].label,
-    tools: Object.fromEntries(Object.entries(CATALOGUE[s].tools).map(([n, [, p, d]]) => [n, { answers: d, params: p }])),
+    tools: Object.fromEntries(Object.entries(CATALOGUE[s].tools).map(([n, [, pr, d]]) => [n, { answers: d, params: pr }])),
   }])) : null
-  return `You are Aimelia, Tom Stanley's assistant at Williams, Stanley & Co, talking with Tom in a chat.
-It is ${now.date} ${now.time}, London.
+  const has = (t: string) => tools.includes(t)
+  return `You are Aimelia, Tom Stanley's chief of staff at Williams, Stanley & Co, a London hospitality accountancy firm. Tom is the founder,
+CEO and CFO, a chartered accountant and tax adviser. You are talking with him in a chat.
+It is ${now.date} ${now.time}, London (${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][now.weekday]}).
 
-${houseRules}
-
+${p.house_rules}
+${p.team_directory.trim() ? `\nThe team (for delegating and for knowing who people are):\n${p.team_directory.trim()}\n` : ''}
+${memory.length ? `What Tom has asked you to remember (id: fact):\n${memory.map((m) => `${m.id}: ${m.fact}`).join('\n')}\n` : ''}
 You can use these tools:
 ${JSON.stringify(Object.fromEntries(tools.map((n) => [n, { does: TOOLS[n].about, args: TOOLS[n].args }])), null, 1)}
 ${catalogue ? `\nws_systems (for ws_lookup):\n${JSON.stringify(catalogue, null, 1)}\n` : ''}
 Respond with a single JSON object and nothing else, one of:
-{"tool_calls": [ {"tool": "name", "args": {}} ]}   to look things up or act, up to ${MAX_CALLS} at once
+{"tool_calls": [ {"tool": "name", "args": {}} ]}   to look things up or act; up to ${MAX_CALLS} at once, and they run together
 {"reply": "your answer to Tom"}                   when you have what you need
 
 How to work:
+- Work the problem through before answering. Break a big ask into steps, and chain tools: find, read, work out, then act.
+  Make independent lookups in the same step so they run together. Check your own work before you reply.
 - Use the tools for any fact about Tom's tasks, email, diary, knowledge base or clients. Never guess or invent one.
-- If a tool says something is unavailable or not connected, say so plainly rather than working around it.
-- create_task, answer_question, add_to_knowledge and remember change things: use them only when Tom asks, then confirm what you did.
-- Before answering about a client, a person, a date or how Tom likes something done, check search_memory. If what Tom says
-  now contradicts a memory, point it out and offer to correct it with remember.
+- Put every sum through calculate and quote its results; never do arithmetic in your head.
+${has('web_search') ? '- For outside facts that change (HMRC rates and thresholds, deadlines, legislation, news), use web_search and name the source.\n' : ''}- If a tool says something is unavailable or not connected, say so plainly rather than working around it.
+- Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
+  run only when Tom asks for that outcome. Then do it without asking again, and confirm exactly what you did.
+- When Tom tells you something lasting about himself, the firm, clients or how he wants things done, offer to remember it, or remember it if he says so.
+- Before answering about a client, a person, a date or how Tom likes something done, check search_memory as well as what you remember below.
+  If what Tom says now contradicts a memory, point it out and offer to correct it: forget the old one and remember the new.
 - Tom may attach photos, PDFs or documents: receipts, invoices, letters from HMRC, whiteboards, screenshots, management accounts.
   Read them yourself. Say what matters in them, quote figures exactly, and say plainly if something is unreadable.
   Offer to turn the actions in them into tasks, or to file them in the knowledge base.
-- You cannot send email or change the calendar. Offer to add a task instead, and the agent team drafts it for approval.
+- You never send email. ${has('draft_email') ? 'You can save drafts in Outlook for Tom to send himself.' : 'Offer to add a task instead, and the agent team drafts it for approval.'}
 - Replies are plain text: short paragraphs or simple lists, no markdown headings, no bold, no tables.
-- Lead with the answer. Be brief. Flag anything touching money movement, HMRC, VAT, PAYE, NIC or tronc.`
+- Lead with the answer, then the reasoning that matters. Be brief. Flag anything touching money movement, HMRC, VAT, PAYE, NIC or tronc.`
 }
 
 /**
@@ -258,17 +413,35 @@ function asResult(value: unknown): string {
 }
 
 /** Run one turn: the conversation so far (ending with Tom's message) in, the reply and the steps taken out. */
-export async function converse(rows: Turn[]): Promise<{ reply: string; steps: Step[] }> {
-  const pipeline = await getPipeline()
-  const tools = await availableTools()
-  const system = systemPrompt(pipeline.house_rules, tools)
+export async function converse(rows: Turn[], now: () => number = Date.now): Promise<{ reply: string; steps: Step[] }> {
+  const started = now()
+  await moveChatMemory()
+  const [pipeline, tools, memory] = await Promise.all([getPipeline(), availableTools(), rememberedFor(rows.at(-1)?.content || '')])
+  const system = systemPrompt(pipeline, tools, memory)
   const messages = history(rows)
   const steps: Step[] = []
+  const provider = resolveProvider('auto')
+  let model = provider === 'anthropic' ? chatModel() : null
+  const ask = async (step: number) => {
+    const call = { provider, role: 'chat', system, messages, maxTokens: 16000, effort: 'high' as const, fallback: true, temperature: 0.3, json: true,
+      // One retry on an overload or rate limit; each attempt gets half the time left, so both fit.
+      retries: 1, timeoutMs: Math.max(30_000, Math.floor((HARD_STOP_MS - (now() - started)) / 2)),
+      payload: { message: rows.at(-1)?.content, files: (rows.at(-1)?.files || []).map((f) => f.name), step, steps, tools } }
+    try {
+      return await complete({ ...call, model })
+    } catch (e) {
+      // The default model refused outright (not offered to this account, or its data retention rules): use Opus 5 from now on.
+      if (!(model === CHAT_MODEL && !env.chatModel() && e instanceof LLMError && /\b(400|403|404)\b/.test(e.message))) throw e
+      chatModelRefused = true
+      model = FALLBACK_MODEL
+      return complete({ ...call, model })
+    }
+  }
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const last = step === MAX_STEPS - 1
-    const text = await complete({ provider: 'auto', role: 'chat', system, messages, maxTokens: 2000, temperature: 0.3, json: true,
-      payload: { message: rows.at(-1)?.content, files: (rows.at(-1)?.files || []).map((f) => f.name), step, steps, tools } })
+    const last = step === MAX_STEPS - 1 || now() - started > BUDGET_MS
+    if (last && step > 0) messages[messages.length - 1].content += '\n\nNo more tools: reply to Tom now with what you have.'
+    const text = await ask(step)
     let out: any
     try { out = parseJson(text) } catch { return { reply: text.trim(), steps } } // plain text is taken as the reply
     const calls = Array.isArray(out.tool_calls) ? out.tool_calls.slice(0, MAX_CALLS) : []
@@ -277,27 +450,24 @@ export async function converse(rows: Turn[]): Promise<{ reply: string; steps: St
         : last && calls.length ? 'I ran out of steps before finishing. Ask again with a narrower question.' : 'I have nothing to add.'
       return { reply, steps }
     }
-    const results = []
-    for (const c of calls) {
+    // The calls in one step run together.
+    const done = await Promise.all(calls.map(async (c: any) => {
       const name = String(c?.tool || '')
       const args: Args = c?.args && typeof c.args === 'object' ? c.args : {}
       if (!tools.includes(name)) {
-        steps.push({ tool: name, args, ok: false, note: 'not available' })
-        results.push({ tool: name, result: `Unknown or unavailable tool. Use one of: ${tools.join(', ')}` })
-        continue
+        return { step: { tool: name, args, ok: false, note: 'not available' }, result: { tool: name, result: `Unknown or unavailable tool. Use one of: ${tools.join(', ')}` } }
       }
       try {
         const value = await TOOLS[name].run(args)
-        steps.push({ tool: name, args, ok: true, note: typeof value === 'string' ? clip(value, 120) : '' })
-        results.push({ tool: name, result: asResult(value) })
+        return { step: { tool: name, args, ok: true, note: typeof value === 'string' ? clip(value, 120) : '' }, result: { tool: name, result: asResult(value) } }
       } catch (e) {
         const msg = clip((e as Error).message, 300)
-        steps.push({ tool: name, args, ok: false, note: msg })
-        results.push({ tool: name, result: `unavailable: ${msg}` })
+        return { step: { tool: name, args, ok: false, note: msg }, result: { tool: name, result: `unavailable: ${msg}` } }
       }
-    }
+    }))
+    steps.push(...done.map((d) => d.step))
     messages.push({ role: 'assistant', content: JSON.stringify({ tool_calls: calls }) })
-    messages.push({ role: 'user', content: `Tool results:\n${JSON.stringify(results)}${step === MAX_STEPS - 2 ? '\n\nThat was your last lookup: reply to Tom now.' : ''}` })
+    messages.push({ role: 'user', content: `Tool results:\n${JSON.stringify(done.map((d) => d.result))}` })
   }
   return { reply: 'I ran out of steps before finishing.', steps } // not reached
 }

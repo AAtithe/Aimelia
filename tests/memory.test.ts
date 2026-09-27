@@ -191,7 +191,7 @@ describe('what Aimelia knows is used', () => {
     await req('POST', '/memory', { kind: 'client', subject: 'Corrigans', content: 'Corrigans year end is 30 June.' })
     replies.chat = [
       { tool_calls: [{ tool: 'search_memory', args: { query: 'Corrigans year end' } }] },
-      { tool_calls: [{ tool: 'remember', args: { subject: 'Corrigans', kind: 'person', content: 'Priya Shah is the new FD at Corrigans.' } }] },
+      { tool_calls: [{ tool: 'remember', args: { subject: 'Corrigans', kind: 'person', fact: 'Priya Shah is the new FD at Corrigans.' } }] },
       { reply: 'Their year end is 30 June. I have noted Priya as FD.' },
     ]
     const r = await talk({ message: 'When is Corrigans year end? Also remember Priya Shah is their new FD' })

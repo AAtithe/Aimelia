@@ -22,6 +22,9 @@ const STEP_LABEL: Record<string, string> = {
   briefing: 'Checked what is waiting on you', search_tasks: 'Searched tasks', get_task: 'Read a task', create_task: 'Added a task',
   answer_question: 'Answered an agent question', search_knowledge: 'Searched the knowledge base', recent_emails: 'Read sorted email',
   upcoming_meetings: 'Read the calendar', ws_lookup: 'Looked up', add_to_knowledge: 'Saved to the knowledge base',
+  update_task: 'Updated a task', calculate: 'Worked out the figures', web_search: 'Searched the web', remember: 'Remembered',
+  forget: 'Forgot', search_conversations: 'Searched earlier conversations', search_email: 'Searched your mailbox', read_email: 'Read an email',
+  draft_email: 'Saved a draft in Outlook (not sent)', meeting_brief: 'Wrote a meeting brief', book_focus_time: 'Booked focus time',
 }
 
 export const STARTERS = [
@@ -40,7 +43,9 @@ const LONG_SIDE = 1600
 function stepText(s: Step) {
   const label = STEP_LABEL[s.tool] || s.tool
   const detail = s.tool === 'ws_lookup' ? ` ${s.args.source}.${s.args.tool}` : s.args.query ? `: "${s.args.query}"`
-    : (s.tool === 'create_task' || s.tool === 'add_to_knowledge') && s.args.title ? `: ${s.args.title}` : ''
+    : s.tool === 'calculate' && s.args.sums ? `: ${Object.keys(s.args.sums).slice(0, 4).join(', ')}`
+    : (s.tool === 'create_task' || s.tool === 'add_to_knowledge' || s.tool === 'book_focus_time') && s.args.title ? `: ${s.args.title}`
+    : s.tool === 'remember' && s.args.fact ? `: ${s.args.fact}` : s.tool === 'draft_email' && s.args.subject ? `: ${s.args.subject}` : ''
   return `${label}${detail}${s.ok ? '' : ` (${s.note || 'failed'})`}`
 }
 
