@@ -36,14 +36,26 @@ apply to it too.
 | search_tasks, get_task | Find tasks by words or status; read one with its draft actions and questions |
 | create_task | Adds a task for the agent team (source `chat`), as Add task does. Only when Tom asks |
 | answer_question | Answers an open agent question; the task goes back to the team once none are left, as the button does |
+| add_to_knowledge | Files text in the knowledge base (for a photo or PDF, the text it read), as Add a document does. Only when Tom asks |
 | search_knowledge | The knowledge base, full-text |
 | recent_emails | Sorted email from triage, as stored |
 | upcoming_meetings | The calendar, read only. Offered only while Microsoft 365 is connected |
 | ws_lookup | The same read-only WSCIP and Payroll Command Center catalogue the agents use. Offered only when one is connected |
 
+Photos, PDFs and documents can go with any message: Attach, drag and drop, or paste a screenshot (up to five files,
+about 3 MB together, Vercel's request limit). Photos over about 1 MB, and every iPhone HEIC photo the browser can open,
+are redrawn in the browser as JPEG with the longest side at 1600px, so a phone photo fits. On the server
+(`src/lib/chat/files.ts`) a photo or PDF is recognised by its first bytes, never its name: PNG, JPEG, GIF, WebP and PDF are
+kept as they are and shown to the model, which reads them itself. Claude reads photos and PDFs; OpenAI reads photos
+only, and a PDF without the Claude key is refused plainly. Word, text, CSV and transcripts become text with the Import
+reader and go inside the message. Anything else is refused with what to send instead, before anything is stored. Files
+are kept in `chat_files` with their message and shown back as thumbnails and links; they are served only as the checked
+photo and PDF types, or as plain text, with `nosniff`. To keep turns fast and cheap, photos and PDFs are sent to the
+model again only for the six most recent messages; older ones are named as no longer in view.
+
 It cannot send email or change the calendar; asked to, it offers to add a task so the team drafts it for approval. Each
 reply lists the steps it took. Conversations are kept (`chats`, `chat_messages`), the last 20 messages go to the model,
-Tom's message is saved before the model is called so a failure loses nothing, and conversations can be deleted.
+Tom's message and files are saved before the model is called so a failure loses nothing, and conversations can be deleted.
 
 ## Importing tasks
 

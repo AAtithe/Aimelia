@@ -6,14 +6,17 @@
  * to the model, and the loop repeats up to MAX_STEPS times. The protocol is plain JSON rather than
  * a provider's native tool use, so it works the same with Claude, OpenAI and the mock.
  *
- * Every tool reads, except create_task and answer_question, which do exactly what the matching
- * buttons do. Nothing is ever sent: email stays as drafts made elsewhere, and the calendar is only read.
+ * Tom can attach photos, PDFs and documents to a message (see files.ts). Photos and PDFs go to the model
+ * as they are, for the last few messages only; documents go as their text.
+ *
+ * Every tool reads, except create_task, answer_question and add_to_knowledge, which do exactly what the
+ * matching buttons do. Nothing is ever sent: email stays as drafts made elsewhere, and the calendar is only read.
  */
 import { iso, one, q } from '../db'
-import { complete, parseJson, type Message } from '../llm'
+import { complete, parseJson, type Attachment, type Message } from '../llm'
 import { londonParts } from '../dates'
 import { runLater } from '../router'
-import { search } from '../email/knowledge'
+import { index, search } from '../email/knowledge'
 import { upcomingEvents } from '../email/briefs'
 import { connection } from '../microsoft'
 import { resumeIfAnswered } from '../agents/api'
@@ -24,9 +27,12 @@ import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources
 export const MAX_STEPS = 6
 const MAX_CALLS = 4
 const HISTORY = 20
+const FILES_IN_VIEW = 6 // photos and PDFs are sent again only for this many most recent messages
+const MAX_DOC_TEXT = 30_000
 const MAX_RESULT = 6000
 const clip = (t: unknown, n = 400) => { const s = String(t ?? ''); return s.length <= n ? s : `${s.slice(0, n)} ...` }
 
+export type Turn = { role: string; content: string; files?: { name: string; kind: string; media_type: string; data: string | null; text: string | null }[] }
 export type Step = { tool: string; args: Record<string, unknown>; ok: boolean; note: string }
 type Args = Record<string, any>
 type Tool = { about: string; args: string; available?: () => Promise<boolean> | boolean; run: (a: Args) => Promise<unknown> }
@@ -114,6 +120,18 @@ export const TOOLS: Record<string, Tool> = {
       return rows.map((r) => ({ title: r.title, source: r.source, text: clip(r.chunk, 900) }))
     },
   },
+  add_to_knowledge: {
+    about: 'Save text to the knowledge base so every feature can draw on it, as Add a document does. Only when Tom asks to file, save or keep something. For a photo or PDF, write out the text you read',
+    args: '{"title": "short title", "text": "the full text to keep", "kind": "document|policy|manual"}',
+    run: async (a) => {
+      const title = String(a.title || '').trim().slice(0, 300)
+      const text = String(a.text || '').trim()
+      if (!title || !text) return 'Not saved: it needs a title and the text.'
+      const kind = ['document', 'policy', 'manual'].includes(a.kind) ? String(a.kind) : 'document'
+      const parts = await index(kind, `${kind}-${Date.now()}`, title, text)
+      return { saved: true, title, kind, parts }
+    },
+  },
   recent_emails: {
     about: 'Tom\'s recent inbox as sorted by email triage: sender, subject, category, urgency 1-5, the action needed',
     args: '{"urgent_only": false, "limit": 10}',
@@ -177,20 +195,41 @@ Respond with a single JSON object and nothing else, one of:
 How to work:
 - Use the tools for any fact about Tom's tasks, email, diary, knowledge base or clients. Never guess or invent one.
 - If a tool says something is unavailable or not connected, say so plainly rather than working around it.
-- create_task and answer_question change things: use them only when Tom asks, then confirm what you did with the task title.
+- create_task, answer_question and add_to_knowledge change things: use them only when Tom asks, then confirm what you did.
+- Tom may attach photos, PDFs or documents: receipts, invoices, letters from HMRC, whiteboards, screenshots, management accounts.
+  Read them yourself. Say what matters in them, quote figures exactly, and say plainly if something is unreadable.
+  Offer to turn the actions in them into tasks, or to file them in the knowledge base.
 - You cannot send email or change the calendar. Offer to add a task instead, and the agent team drafts it for approval.
 - Replies are plain text: short paragraphs or simple lists, no markdown headings, no bold, no tables.
 - Lead with the answer. Be brief. Flag anything touching money movement, HMRC, VAT, PAYE, NIC or tronc.`
 }
 
-/** Consecutive messages from the same side are merged, so a turn that failed half way never breaks the next. */
-function history(rows: { role: string; content: string }[]): Message[] {
+/**
+ * The conversation as the model sees it. Documents become text inside the message; photos and PDFs are
+ * attached only for the last FILES_IN_VIEW messages, and named as no longer in view before that.
+ * Consecutive messages from the same side are merged, so a turn that failed half way never breaks the next.
+ */
+function history(rows: Turn[]): Message[] {
   const out: Message[] = []
-  for (const r of rows.slice(-HISTORY)) {
+  const recent = rows.slice(-HISTORY)
+  recent.forEach((r, i) => {
     const role = r.role === 'assistant' ? 'assistant' : 'user'
-    if (out.length && out.at(-1)!.role === role) out.at(-1)!.content += `\n\n${r.content}`
-    else out.push({ role, content: r.content })
-  }
+    const inView = i >= recent.length - FILES_IN_VIEW
+    const files: Attachment[] = []
+    let content = r.content.trim() || (r.files?.length ? '(No message, just the attached files. Read them and say what matters.)' : '')
+    for (const f of r.files || []) {
+      if (f.kind === 'text') content += `\n\n[Attached document: ${f.name}]\n${clip(f.text, MAX_DOC_TEXT)}`
+      else if (inView && f.data) files.push({ kind: f.kind === 'pdf' ? 'pdf' : 'image', media_type: f.media_type, data: f.data, name: f.name })
+      else content += `\n\n[Tom attached ${f.name} earlier; it is no longer in view. Ask him to send it again if you need it.]`
+    }
+    if (files.length) content += `\n\n[Attached: ${files.map((f) => f.name).join(', ')}]`
+    if (!content.trim()) content = '(No message, just the attached files.)'
+    const last = out.at(-1)
+    if (last && last.role === role) {
+      last.content += `\n\n${content}`
+      if (files.length) last.files = [...(last.files || []), ...files]
+    } else out.push({ role, content: content.trim(), ...(files.length ? { files } : {}) })
+  })
   while (out.length && out[0].role !== 'user') out.shift()
   return out
 }
@@ -201,7 +240,7 @@ function asResult(value: unknown): string {
 }
 
 /** Run one turn: the conversation so far (ending with Tom's message) in, the reply and the steps taken out. */
-export async function converse(rows: { role: string; content: string }[]): Promise<{ reply: string; steps: Step[] }> {
+export async function converse(rows: Turn[]): Promise<{ reply: string; steps: Step[] }> {
   const pipeline = await getPipeline()
   const tools = await availableTools()
   const system = systemPrompt(pipeline.house_rules, tools)
@@ -211,7 +250,7 @@ export async function converse(rows: { role: string; content: string }[]): Promi
   for (let step = 0; step < MAX_STEPS; step++) {
     const last = step === MAX_STEPS - 1
     const text = await complete({ provider: 'auto', role: 'chat', system, messages, maxTokens: 2000, temperature: 0.3, json: true,
-      payload: { message: rows.at(-1)?.content, step, steps, tools } })
+      payload: { message: rows.at(-1)?.content, files: (rows.at(-1)?.files || []).map((f) => f.name), step, steps, tools } })
     let out: any
     try { out = parseJson(text) } catch { return { reply: text.trim(), steps } } // plain text is taken as the reply
     const calls = Array.isArray(out.tool_calls) ? out.tool_calls.slice(0, MAX_CALLS) : []

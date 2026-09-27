@@ -4,6 +4,7 @@
  * - "auto" picks Anthropic when ANTHROPIC_API_KEY is set, then OpenAI, then the mock.
  * - Temperature is not sent to Claude: models after Opus 4.6 reject it. It applies to OpenAI only.
  * - A PDF is sent to Claude as a document block, so Claude reads the pages itself (text, tables and scans).
+ * - A message can carry files (photos and PDFs). Claude reads both; OpenAI reads photos only.
  * - The mock gives deterministic answers so the whole app runs with no keys (demos, tests).
  * - Tests replace the transport with setModelTransport().
  */
@@ -21,7 +22,8 @@ export const DEFAULT_MODELS: Record<Exclude<Provider, 'auto'>, string> = {
 
 export class LLMError extends Error {}
 
-export type Message = { role: 'user' | 'assistant'; content: string }
+export type Attachment = { kind: 'image' | 'pdf'; media_type: string; data: string; name: string } // data is base64
+export type Message = { role: 'user' | 'assistant'; content: string; files?: Attachment[] }
 export type ModelCall = {
   provider: Provider
   model?: string | null
@@ -80,9 +82,14 @@ const realTransport: Transport = async (call) => {
     const key = env.anthropicKey()
     if (!key) throw new LLMError('ANTHROPIC_API_KEY is not set.')
     const client = new Anthropic({ apiKey: key })
-    const messages: Anthropic.MessageParam[] = call.messages.map((m, i) => i === 0 && call.pdf
-      ? { role: m.role, content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: call.pdf } }, { type: 'text', text: m.content }] }
-      : m)
+    const messages: Anthropic.MessageParam[] = call.messages.map((m, i) => {
+      const files = [...(i === 0 && call.pdf ? [{ kind: 'pdf' as const, media_type: 'application/pdf', data: call.pdf, name: '' }] : []), ...(m.files || [])]
+      if (!files.length) return { role: m.role, content: m.content }
+      return { role: m.role, content: [...files.map((f): Anthropic.ContentBlockParam => f.kind === 'pdf'
+        ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } }
+        : { type: 'image', source: { type: 'base64', media_type: f.media_type as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: f.data } }),
+      { type: 'text', text: m.content }] }
+    })
     const params = { model: call.model, max_tokens: call.maxTokens ?? 4096, system: call.system, messages }
     const opts = call.timeoutMs ? { timeout: call.timeoutMs, maxRetries: 0 } : undefined
     // Long reads stream, so a big reply is not held to the SDK's non-streaming limits.
@@ -92,13 +99,15 @@ const realTransport: Transport = async (call) => {
     if (res.stop_reason === 'refusal') throw new LLMError('Claude declined to read this.')
     return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
   }
-  if (call.pdf) throw new LLMError('Reading PDFs needs the Claude (Anthropic) API key.')
+  if (call.pdf || call.messages.some((m) => m.files?.some((f) => f.kind === 'pdf'))) throw new LLMError('Reading PDFs needs the Claude (Anthropic) API key.')
   const key = env.openaiKey()
   if (!key) throw new LLMError('OPENAI_API_KEY is not set.')
   const client = new OpenAI({ apiKey: key })
   const base = {
     model: call.model,
-    messages: [{ role: 'system' as const, content: call.system }, ...call.messages],
+    messages: [{ role: 'system' as const, content: call.system }, ...call.messages.map((m): OpenAI.ChatCompletionMessageParam => m.role === 'user' && m.files?.length
+      ? { role: 'user', content: [...m.files.map((f) => ({ type: 'image_url' as const, image_url: { url: `data:${f.media_type};base64,${f.data}` } })), { type: 'text' as const, text: m.content }] }
+      : { role: m.role, content: m.content })],
     ...(call.json ? { response_format: { type: 'json_object' as const } } : {}),
     ...(call.maxTokens ? { max_completion_tokens: call.maxTokens } : {}),
   }
@@ -153,8 +162,10 @@ function mockReply(call: ModelCall): string {
     }
     case 'import':
       return out({ tasks: actionLines(String(p.text || '')).map((title) => ({ title, notes: '', owner: null, priority: 2, due_date: null })) })
-    case 'chat':
-      return out({ reply: 'Placeholder reply: no AI key is set on the server, so I cannot read or answer yet. Add the Claude (Anthropic) key in Settings.' })
+    case 'chat': {
+      const got = (p.files || []).length ? ` I received ${p.files.join(', ')}, but cannot read it without a key.` : ''
+      return out({ reply: `Placeholder reply: no AI key is set on the server, so I cannot read or answer yet.${got} Add the Claude (Anthropic) key in Settings.` })
+    }
     case 'triage':
       return out({ category: 'General', urgency: 3, confidence: 0, reasoning: 'Placeholder: no AI key is set.', action_required: 'Read and decide.' })
     case 'worker':
