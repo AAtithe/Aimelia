@@ -36,6 +36,14 @@ action on it is done. Marking an email, call or handover done schedules its chec
 date), unless Tom marks it done with no check needed. Approving a decision or a note settles it at once. It opens on the first section with
 something in it; the figures along the top open their section.
 
+## Adding tasks
+
+The type bar at the bottom of Today and All tasks (and the iPhone shortcut, through `/api/todo/capture`) saves what is
+sent at once, one task per line, and answers straight away. After the response the AI reads the whole dump and tidies
+the new tasks before the team starts on them: cleaner titles, priorities and due dates from the wording, a line that
+held several tasks split, lines that were one task joined. It only touches tasks the team has not started; if the AI
+is unavailable the tasks stay as typed.
+
 ## Finding tasks
 
 - **The search box** at the top right of every page searches every task, open or completed, as you type: titles, briefs,

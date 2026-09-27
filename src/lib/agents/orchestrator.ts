@@ -255,6 +255,39 @@ async function saveActions(taskId: string, draft: Draft[], approved: boolean,
 
 // ---------------------------------------------------------------- capture
 
+const BULLET = /^\s*(?:[-*\u2022]|\d+[.)])\s*/
+
+/** A brain dump taken at its word, with no AI: one task per line, bullets and numbers stripped. */
+export function captureLines(text: string) {
+  return text.split('\n').map((l) => l.replace(BULLET, '').trim()).filter(Boolean).map((line) => line.length <= 200
+    ? { title: line, notes: '' }
+    : { title: `${line.slice(0, 120).replace(/\s+\S*$/, '')} ...`, notes: line })
+}
+
+/**
+ * After the response: the AI reads the dump and the tasks made from its lines are brought into line with what it
+ * finds: cleaned titles, priorities and due dates, a line that held several tasks split, two lines that were one
+ * task joined. Only while none of them has been started, so nothing the team is working on moves.
+ */
+export async function refineCapture(text: string, taskIds: string[]) {
+  const items = await splitCapture(text)
+  if (!items.length || !taskIds.length) return 0
+  const untouched = await q(`SELECT id FROM tasks WHERE id = ANY($1::uuid[]) AND status = 'queued' AND run_count = 0`, [taskIds])
+  if (untouched.length !== taskIds.length) return 0
+  for (let i = 0; i < Math.max(items.length, taskIds.length); i++) {
+    const it = items[i], id = taskIds[i]
+    if (it && id) {
+      await q(`UPDATE tasks SET title = $2, notes = CASE WHEN $3 <> '' THEN $3 ELSE notes END, priority = $4, due_date = COALESCE($5, due_date), updated_at = now() WHERE id = $1`,
+        [id, it.title, it.notes, it.priority, it.due_date])
+    } else if (it) {
+      await q(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, $3, $4, now())`, [it.title, it.notes, it.priority, it.due_date])
+    } else {
+      await q(`DELETE FROM tasks WHERE id = $1`, [id])
+    }
+  }
+  return items.length
+}
+
 export async function splitCapture(text: string) {
   const pipeline = await getPipeline()
   let reply: any
@@ -267,7 +300,7 @@ export async function splitCapture(text: string) {
   } catch (e) {
     // Never lose a brain dump because the AI is down or misconfigured: one task per line instead.
     console.error('Capture split failed, falling back to lines', (e as Error).message)
-    reply = { tasks: text.split('\n').map((l) => l.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim()).filter(Boolean).map((title) => ({ title })) }
+    reply = { tasks: captureLines(text) }
   }
   const out: { title: string; notes: string; priority: number; due_date: string | null }[] = []
   for (const t of Array.isArray(reply.tasks) ? reply.tasks : []) {

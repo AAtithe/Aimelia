@@ -92,10 +92,13 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
         setMsg({ ok: true, text: docs.length ? `Added with ${docs.length} document${docs.length === 1 ? '' : 's'}. Claude reads and assesses them, then the team works them through.` : 'Added. The team is on it.' })
         setTitle(''); setText(''); setDue(''); setPriority(2); setDocs([]); setDocsKey((k) => k + 1)
       } else {
-        const made = await api<Task[]>('/capture', { method: 'POST', body: { text } })
-        setMsg({ ok: true, text: made.length === 1 ? `Added "${made[0].title}". The team is on it.`
-          : `Split into ${made.length} tasks: ${made.map((t) => t.title).join('; ')}. The team is on them.` })
+        // Clear the box at once so the bar is ready for the next thing; put the text back if the send fails.
+        const sent = text
         setText('')
+        let made: Task[]
+        try { made = await api<Task[]>('/capture', { method: 'POST', body: { text: sent } }) } catch (e) { setText(sent); throw e }
+        setMsg({ ok: true, text: made.length === 1 ? `Added "${made[0].title}". Aimelia is tidying it up and the team will start on it.`
+          : `Added ${made.length} tasks. Aimelia is tidying them up and the team will start on them.` })
       }
       onAdded()
     } catch (e: any) {
