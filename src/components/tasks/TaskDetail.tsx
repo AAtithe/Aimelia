@@ -124,6 +124,8 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
               </div>
             )}
 
+            <PlanFields task={task} onChanged={refresh} />
+
             <h3>Brief for the team</h3>
             <textarea className="inp" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)}
               placeholder="Context, people involved, numbers, what good looks like" aria-label="Brief for the team" />
@@ -204,5 +206,33 @@ function EventRow({ e }: { e: AgentEvent }) {
       <span className="when">{fmtDateTime(e.created_at)}</span>
       <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
     </li>
+  )
+}
+
+/** The day it is planned for, how long it should take, and the project it belongs to. */
+function PlanFields({ task, onChanged }: { task: Task; onChanged: () => void }) {
+  const [projects, setProjects] = useState<{ id: string; title: string }[]>([])
+  const [err, setErr] = useState('')
+  useEffect(() => { api<{ projects: { id: string; title: string; kind: string }[] }>('/projects?kind=project').then((r) => setProjects(r.projects)).catch(() => {}) }, [])
+  const patch = async (b: Record<string, unknown>) => { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: b }); setErr(''); onChanged() } catch (e: any) { setErr(e.message) } }
+  if (task.status === 'done') return null
+  return (
+    <>
+      <div className="row2" style={{ marginTop: 10 }}>
+        <label className="fld"><span>Planned for</span>
+          <input type="date" value={task.planned_for || ''} onChange={(e) => patch({ planned_for: e.target.value || null })} /></label>
+        <label className="fld"><span>How long</span>
+          <select value={task.estimate_minutes ?? ''} onChange={(e) => patch({ estimate_minutes: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">Not estimated</option>
+            {[15, 30, 45, 60, 90, 120, 180, 240, 480].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m === 60 ? '' : 's'}`}</option>)}
+          </select></label>
+        <label className="fld"><span>Project</span>
+          <select value={task.project_id || ''} onChange={(e) => patch({ project_id: e.target.value || null })}>
+            <option value="">None</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select></label>
+      </div>
+      {err && <div className="msg err">{err}</div>}
+    </>
   )
 }

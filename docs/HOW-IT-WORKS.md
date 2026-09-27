@@ -122,6 +122,24 @@ model again only for the six most recent messages; older ones are named as no lo
 Conversations are kept (`chats`, `chat_messages`), the last 20 messages go to the model,
 Tom's message and files are saved before the model is called so a failure loses nothing, and conversations can be deleted.
 
+## Planner, projects and items to come back to
+
+`src/lib/planner/`, pages `/planner` and `/projects`.
+
+- **Planner.** The week Monday to Friday. Each day shows the minutes free after meetings (Outlook busy times only, never
+  subjects or attendees; working hours alone if Microsoft 365 is not connected), the tasks planned for it with their
+  estimates (an hour when not estimated), what falls due, and what comes back (parked tasks, items and project reviews).
+  A day over its free time says by how much. Tasks planned for a day that passed and still open show as slipped.
+- **Plan my week** proposes a day and an estimate for each open task within four fifths of the free time (a fifth kept
+  for what comes up): deadlines first, then priority, then projects, with what does not fit and why. Claude writes it;
+  without an AI, or if it fails, a plain plan does the same by due date then priority. Nothing changes until Tom uses the
+  plan. Focus time can be booked on the planned day, for the task's estimate.
+- **Projects** hold tasks (`tasks.project_id`), what done looks like and the next step, show progress, and come back for
+  review every fortnight unless given a date. A project can be handed to the agent team to plan its next steps.
+- **Items to come back to** (an idea, an opportunity, an article) come back in a month unless given a date. When due they
+  show on Today, in the morning push and as a count in the sidebar: make it a task, push it back, mark it done or drop it.
+  Ask Aimelia can keep one with `save_for_later`.
+
 ## Documents on a task
 
 `src/lib/agents/documents.ts`, the Documents section of a task, and the One task form. Attach policies, procedures, risk

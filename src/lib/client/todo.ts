@@ -78,6 +78,9 @@ export interface Task {
   source?: string | null
   handover?: string
   files?: TaskFile[]
+  planned_for?: string | null
+  estimate_minutes?: number | null
+  project_id?: string | null
   questions?: Question[]
   actions?: Action[]
   events?: AgentEvent[]
@@ -188,6 +191,8 @@ export interface Briefing {
   channels: Record<string, boolean>
   sources: Record<string, boolean>
   memory_questions?: number
+  due_back?: { id: string; kind: 'project' | 'item'; title: string; review_on: string; notes: string }[]
+  planned_today?: Task[]
 }
 
 export class ApiError extends Error {

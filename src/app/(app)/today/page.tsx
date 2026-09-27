@@ -6,6 +6,7 @@ import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+import { BackActions, type Project } from '@/components/planner/Projects'
 import { FilterBar, filterQuery, useSettled, NO_FILTERS, type Filters } from '@/components/tasks/Filters'
 import Link from 'next/link'
 
@@ -112,6 +113,21 @@ export default function Today() {
       {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
+          {(brief.planned_today?.length ?? 0) > 0 && (
+            <div className="card"><h2>Planned for today <span className="hcount"><Link href="/planner">Planner</Link></span></h2>
+              <TaskTable tasks={brief.planned_today!} onOpen={setOpenTask} /></div>
+          )}
+          {(brief.due_back?.length ?? 0) > 0 && (
+            <div className="card"><h2>Back on your desk <span className="hcount">{brief.due_back!.length}</span></h2>
+              {brief.due_back!.map((p) => (
+                <div className="item" key={p.id}>
+                  <div className="o"><span className="tag">{p.kind === 'project' ? 'Project review' : 'You wanted to come back to this'}</span></div>
+                  <div className="t"><Link href="/projects">{p.title}</Link></div>
+                  {p.notes && <div className="d">{p.notes.length > 240 ? `${p.notes.slice(0, 240)} ...` : p.notes}</div>}
+                  <BackActions p={p as unknown as Project} onDone={load} />
+                </div>
+              ))}</div>
+          )}
           <p className="cap today-flow">Answer the questions, approve the work, do what you approved, then check it came back.{working ? ` The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</p>
           <FilterBar f={f} set={setF} full={false} />
           <div className="main-tabs today-tabs" role="tablist">
