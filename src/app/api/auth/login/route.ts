@@ -4,16 +4,17 @@ import { randomBytes } from 'node:crypto'
 import { checkAccess } from '@/lib/auth'
 import { seal } from '@/lib/crypto'
 import { env } from '@/lib/env'
+import { loadConfig } from '@/lib/config'
 import { authorizeUrl, STATE_COOKIE, STATE_TTL } from '@/lib/microsoft'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
+  await loadConfig()
   const back = (reason: string) => NextResponse.redirect(`${env.appUrl()}/settings?ms=error&reason=${reason}`)
   const denied = await checkAccess(req)
   if (denied) return NextResponse.redirect(`${env.appUrl()}/`)
-  if (!env.ownerEmails().length) return back('owner_not_configured')
   const nonce = randomBytes(24).toString('base64url')
   let url: string
   try {

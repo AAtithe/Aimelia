@@ -1,7 +1,7 @@
 /**
- * Microsoft 365 connection for the owner's mailbox and calendar.
+ * Microsoft 365 connection for the owner's mailbox and calendar. The app details (tenant, client, secret) come from Settings.
  *
- * - Only AIMELIA_OWNER_EMAIL can connect: the signed-in account is checked before anything is stored.
+ * - Only a Microsoft account matching an Aimelia login can connect; it is checked before anything is stored.
  * - Sign-in state is sealed, expires in ten minutes, and must match a cookie set in the same browser.
  * - Tokens are encrypted at rest and never leave the server.
  * - Mail.Send is deliberately not requested: Aimelia writes drafts, it never sends.
@@ -77,7 +77,8 @@ export async function completeSignIn(code: string): Promise<string | null> {
   if (!me.ok) return 'could_not_confirm_account'
   const profile = (await me.json()) as { mail?: string; userPrincipalName?: string }
   const who = [profile.mail, profile.userPrincipalName].filter(Boolean).map((s) => String(s).toLowerCase())
-  const owners = env.ownerEmails()
+  // Only a Microsoft account matching an Aimelia login may connect.
+  const owners = (await q<{ email: string }>(`SELECT lower(email) AS email FROM users`)).map((r) => r.email)
   if (!who.some((w) => owners.includes(w))) return 'wrong_account'
   await store(tokens, who[0] || null)
   return null

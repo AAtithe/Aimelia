@@ -1,17 +1,19 @@
 /**
  * Microsoft returns here. The state must be ours, unexpired, and match this browser's cookie;
- * the account must be AIMELIA_OWNER_EMAIL. Only then are the tokens stored, encrypted.
+ * the Microsoft account must match an Aimelia login. Only then are the tokens stored, encrypted.
  */
 import { NextResponse } from 'next/server'
 import { readCookie } from '@/lib/auth'
 import { safeEqual, unseal } from '@/lib/crypto'
 import { env } from '@/lib/env'
+import { loadConfig } from '@/lib/config'
 import { completeSignIn, STATE_COOKIE } from '@/lib/microsoft'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
+  await loadConfig()
   const u = new URL(req.url)
   const finish = (reason?: string) => {
     const res = NextResponse.redirect(`${env.appUrl()}/settings?ms=${reason ? `error&reason=${encodeURIComponent(reason)}` : 'connected'}`)

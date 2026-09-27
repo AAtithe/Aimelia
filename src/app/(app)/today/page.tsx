@@ -58,7 +58,7 @@ export default function Today() {
         <div className={`kpi ${c.failed ? 'alert' : ''}`}><span className="n">{brief ? c.failed || 0 : dash}</span><span className="l">Runs that failed</span></div>
       </div>
       <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`} style={{ marginTop: -6 }}>{msg?.text}</div>
-      {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in Vercel.</div>}
+      {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
           <BrainDump onAdded={load} />
