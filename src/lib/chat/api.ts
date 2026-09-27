@@ -7,6 +7,7 @@ import { body, fail } from '../http'
 import type { Endpoint } from '../router'
 import { availableTools, chatModel, converse, TOOLS, type Turn } from './agent'
 import { ACCEPT, MAX_BASE64, MAX_FILES, readChatFile } from './files'
+import { keepNote } from '../memory/store'
 
 const FileIn = z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(1) })
 const Send = z.object({ message: z.string().trim().max(8000).default(''), chat_id: z.string().uuid().nullable().optional(),
@@ -43,6 +44,8 @@ export const chatEndpoints: Endpoint[] = [
     const c = b.chat_id ? await getChat(b.chat_id) : (await one(`INSERT INTO chats (title) VALUES ($1) RETURNING *`, [title]))!
     // Tom's message and files are kept even if the model then fails, so nothing he sent is lost.
     const mine = (await one(`INSERT INTO chat_messages (chat_id, role, content) VALUES ($1, 'user', $2) RETURNING *`, [c!.id, b.message]))!
+    // What Tom tells Ask Aimelia is kept and learned from, like his answers. Short replies ("thanks", "yes") are not.
+    if (b.message.trim().length >= 20) await keepNote('chat', b.message, { conversation: c!.title }, `chat:${mine.id}`)
     const saved: Row[] = []
     for (const f of read) {
       saved.push((await one(`INSERT INTO chat_files (message_id, name, kind, media_type, size, data, text) VALUES ($1, $2, $3, $4, $5, $6, $7)

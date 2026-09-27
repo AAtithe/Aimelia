@@ -33,6 +33,7 @@ import { resumeIfAnswered } from '../agents/api'
 import { getPipeline, logEvent, processQueue, seedDefaults } from '../agents/orchestrator'
 import { touch } from '../agents/schedule'
 import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources'
+import { addMemory, changeMemory, getMemory, keepNote, memoryForContext, moveChatMemory, rememberedFor } from '../memory/store'
 import { calculate } from './calc'
 
 export const MAX_STEPS = 10
@@ -128,9 +129,15 @@ export const TOOLS: Record<string, Tool> = {
       await q(`UPDATE questions SET answer = $2, status = 'answered', answered_at = now() WHERE id = $1`, [qn.id, answer])
       await touch(qn.task_id)
       await logEvent(qn.task_id, 'answer', 'tom', { question: qn.question, answer, via: 'chat' })
+      await keepNote('answer', answer, { question: qn.question, via: 'chat' }, `question:${qn.id}`)
       const resumed = await resumeIfAnswered(qn.task_id, 'questions answered')
       return { answered: true, task_back_with_agents: resumed }
     },
+  },
+  search_memory: {
+    about: 'What Aimelia knows from what Tom has told it before: facts about clients, people and the firm, and how Tom likes things done. Check it before answering about any of those',
+    args: '{"query": "words to search for"}',
+    run: async (a) => memoryForContext(String(a.query || ''), 12),
   },
   search_knowledge: {
     about: 'Search the knowledge base: sorted emails, meeting briefs, and documents and policies Tom has added',
@@ -229,19 +236,25 @@ export const TOOLS: Record<string, Tool> = {
     },
   },
   remember: {
-    about: 'Keep a fact or preference for every future conversation, when Tom says to remember something (who someone is, how he likes things, standing instructions)',
-    args: '{"fact": "the fact, in one sentence"}',
+    about: 'Keep a fact or preference for every future conversation and for the agent team, when Tom says to remember something (who someone is, how he likes things, standing instructions). It goes on What Aimelia knows, marked as checked by Tom',
+    args: '{"fact": "one plain statement, standing on its own", "subject": "who or what it is about", "kind": "fact|preference|person|client|process"}',
     run: async (a) => {
-      const fact = String(a.fact || '').trim().slice(0, 500)
+      const fact = String(a.fact || a.content || '').trim()
       if (!fact) return 'Nothing to remember.'
-      const r = (await one(`INSERT INTO chat_memory (fact) VALUES ($1) RETURNING id`, [fact]))!
-      return { remembered: true, id: r.id, fact }
+      const m = (await addMemory({ kind: a.kind, subject: String(a.subject || ''), content: fact,
+        sources: [{ source: 'chat', label: 'You told Ask Aimelia', quote: fact.slice(0, 300), at: new Date().toISOString() }] }, 'tom', 'Added from Ask Aimelia'))!
+      return { remembered: true, id: m.id, fact: m.content }
     },
   },
   forget: {
-    about: 'Drop a remembered fact when Tom says it is wrong or no longer applies',
+    about: 'Drop a remembered fact when Tom says it is wrong or no longer applies. It is archived on What Aimelia knows, where he can bring it back',
     args: '{"id": "memory id from what you remember"}',
-    run: async (a) => ((await q(`DELETE FROM chat_memory WHERE id::text = $1 RETURNING id`, [String(a.id || '')])).length ? { forgotten: true } : 'No memory with that id.'),
+    run: async (a) => {
+      const m = await getMemory(String(a.id || ''))
+      if (!m || m.status !== 'active') return 'No memory with that id.'
+      await changeMemory(m.id, { status: 'archived' }, 'tom', 'Forgotten in Ask Aimelia')
+      return { forgotten: true, fact: m.content }
+    },
   },
   search_conversations: {
     about: 'Search earlier Ask Aimelia conversations for what was said before',
@@ -365,6 +378,8 @@ ${has('web_search') ? '- For outside facts that change (HMRC rates and threshold
 - Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
   run only when Tom asks for that outcome. Then do it without asking again, and confirm exactly what you did.
 - When Tom tells you something lasting about himself, the firm, clients or how he wants things done, offer to remember it, or remember it if he says so.
+- Before answering about a client, a person, a date or how Tom likes something done, check search_memory as well as what you remember below.
+  If what Tom says now contradicts a memory, point it out and offer to correct it: forget the old one and remember the new.
 - Tom may attach photos, PDFs or documents: receipts, invoices, letters from HMRC, whiteboards, screenshots, management accounts.
   Read them yourself. Say what matters in them, quote figures exactly, and say plainly if something is unreadable.
   Offer to turn the actions in them into tasks, or to file them in the knowledge base.
@@ -411,8 +426,9 @@ function asResult(value: unknown): string {
 /** Run one turn: the conversation so far (ending with Tom's message) in, the reply and the steps taken out. */
 export async function converse(rows: Turn[], now: () => number = Date.now): Promise<{ reply: string; steps: Step[] }> {
   const started = now()
-  const [pipeline, tools, memory] = await Promise.all([getPipeline(), availableTools(), q(`SELECT id, fact FROM chat_memory ORDER BY created_at LIMIT 100`)])
-  const system = systemPrompt(pipeline, tools, memory as { id: string; fact: string }[])
+  await moveChatMemory()
+  const [pipeline, tools, memory] = await Promise.all([getPipeline(), availableTools(), rememberedFor(rows.at(-1)?.content || '')])
+  const system = systemPrompt(pipeline, tools, memory)
   const messages = history(rows)
   const steps: Step[] = []
   const provider = resolveProvider('auto')

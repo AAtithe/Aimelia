@@ -311,4 +311,73 @@ export const SCHEMA: string[] = [
     fact text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
   )`,
+  // ---------------------------------------------------------------- memory: what Aimelia knows
+  // Everything Tom tells Aimelia, word for word. Never removed when a task is; only Tom can delete a note.
+  `CREATE TABLE IF NOT EXISTS memory_notes (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    source text NOT NULL,
+    ref text NOT NULL,
+    text text NOT NULL,
+    context jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz,
+    claimed_at timestamptz,
+    attempts int NOT NULL DEFAULT 0,
+    error text
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS memory_notes_ref_idx ON memory_notes (source, ref)`,
+  `CREATE INDEX IF NOT EXISTS memory_notes_open_idx ON memory_notes (processed_at, created_at)`,
+  // The facts drawn from them. pinned means Tom wrote or edited it: agents may question it but never change it.
+  `CREATE TABLE IF NOT EXISTS memories (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind text NOT NULL DEFAULT 'fact',
+    subject text NOT NULL DEFAULT '',
+    content text NOT NULL,
+    status text NOT NULL DEFAULT 'active',
+    pinned boolean NOT NULL DEFAULT false,
+    sources jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_by text NOT NULL DEFAULT 'aimelia',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    confirmed_at timestamptz,
+    tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', subject || ' ' || content)) STORED
+  )`,
+  `CREATE INDEX IF NOT EXISTS memories_tsv_idx ON memories USING gin (tsv)`,
+  `CREATE INDEX IF NOT EXISTS memories_status_idx ON memories (status, updated_at)`,
+  `CREATE TABLE IF NOT EXISTS memory_questions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    question text NOT NULL,
+    why text NOT NULL DEFAULT '',
+    memory_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+    asked_by text NOT NULL DEFAULT 'weekly_check',
+    status text NOT NULL DEFAULT 'open',
+    answer text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    answered_at timestamptz
+  )`,
+  // Every change to a memory, by whom, before and after. Kept when the memory is deleted.
+  `CREATE TABLE IF NOT EXISTS memory_log (
+    id bigserial PRIMARY KEY,
+    memory_id uuid,
+    action text NOT NULL,
+    actor text NOT NULL,
+    before jsonb,
+    after jsonb,
+    note text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  )`,
+  `CREATE INDEX IF NOT EXISTS memory_log_memory_idx ON memory_log (memory_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS memory_reviews (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    week text NOT NULL,
+    trigger text NOT NULL DEFAULT 'weekly',
+    status text NOT NULL DEFAULT 'running',
+    summary text NOT NULL DEFAULT '',
+    counts jsonb NOT NULL DEFAULT '{}'::jsonb,
+    error text,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz
+  )`,
+  // One weekly check per week, however many ticks see it due at once.
+  `CREATE UNIQUE INDEX IF NOT EXISTS memory_reviews_week_idx ON memory_reviews (week) WHERE trigger = 'weekly'`,
 ]

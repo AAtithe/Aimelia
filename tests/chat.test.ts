@@ -348,10 +348,25 @@ describe('Ask Aimelia, the full agent', () => {
     const calls = script({ reply: 'Mandy.' })
     await req('POST', '/chats', { message: 'Who runs payroll?' }) // a new conversation
     expect(calls[0].system).toContain('Mandy Lee runs payroll')
-    const [m] = await q(`SELECT id FROM chat_memory`)
+    // One memory for everything: it shows on What Aimelia knows as Tom's own, and the agent team gets it too.
+    const [m] = await q(`SELECT id, pinned, created_by, status FROM memories`)
+    expect([m.pinned, m.created_by, m.status]).toEqual([true, 'tom', 'active'])
     script({ tool_calls: [{ tool: 'forget', args: { id: m.id } }] }, { reply: 'Forgotten.' })
     await req('POST', '/chats', { message: 'Forget that' })
+    expect((await one(`SELECT status FROM memories WHERE id = $1`, [m.id]))!.status).toBe('archived') // Tom can bring it back
+    const next = script({ reply: 'No one on record.' })
+    await req('POST', '/chats', { message: 'Who runs payroll?' })
+    expect(next[0].system).not.toContain('Mandy Lee runs payroll')
+  })
+
+  it('facts kept by the earlier Ask Aimelia memory move into What Aimelia knows, once', async () => {
+    await q(`INSERT INTO chat_memory (fact, created_at) VALUES ('Tom signs off emails Best, Tom', '2026-09-20T10:00:00Z')`)
+    const calls = script({ reply: 'Hello.' })
+    await req('POST', '/chats', { message: 'Morning' })
+    expect(calls[0].system).toContain('Tom signs off emails Best, Tom')
     expect(await q(`SELECT * FROM chat_memory`)).toEqual([])
+    const moved = await q(`SELECT content, pinned, created_at FROM memories`)
+    expect(moved.map((r) => [r.content, r.pinned, new Date(r.created_at).toISOString()])).toEqual([['Tom signs off emails Best, Tom', true, '2026-09-20T10:00:00.000Z']])
   })
 
   it('searches earlier conversations', async () => {

@@ -36,8 +36,8 @@ settings), the chat and web search drop to Claude Opus 5 and stay there until th
 budget: after 230 seconds it must reply, and no model call may run past 285 seconds, inside Vercel's 300. Each call gets
 one retry on an overload or rate limit.
 
-What it has to work with, besides the tools: the agent team's house rules, the team directory, and everything Tom has
-asked it to remember (`chat_memory`), in every conversation.
+What it has to work with, besides the tools: the agent team's house rules, the team directory, and from What Aimelia
+knows (below) the memories Tom set or checked, his standing preferences, and those that bear on his message.
 
 | Tool | What it does |
 |---|---|
@@ -104,6 +104,30 @@ so an import is never lost. Each import is recorded by source and a fingerprint 
 id); the record is claimed before tasks are written, so the same thing is never imported twice by accident. Importing it
 again is refused with the date it came in, unless confirmed. Old binary `.doc` files, and files named .pdf that are not PDFs, are refused with what to do
 instead. Files are limited to 3 MB, Vercel's request limit after encoding.
+
+## What Aimelia knows
+
+`/memory`, `src/lib/memory/`. Aimelia keeps everything Tom writes to it and learns from it.
+
+- **Notes** (`memory_notes`): every answer to an agent question, feedback, reason for sending a draft back, task brief, brain
+  dump, Ask Aimelia message (20 characters or more) and answer to a memory question, word for word. A note outlives its
+  task; only Tom deletes one.
+- **Memories** (`memories`): short statements drawn from the notes by the AI, each with the notes it came from. A new note is
+  compared with related memories: it adds one, updates or confirms one, or raises a conflict as a question for Tom.
+- **Tom's word is final.** Anything Tom adds or edits is marked checked by him (`pinned`). The AI and the weekly check never
+  change a checked memory; they ask him instead.
+- **Used everywhere that matters.** The agent team gets Tom's standing preferences and the memories that bear on each task,
+  and is told to flag contradictions. Ask Aimelia has `search_memory`, and its `remember` and `forget` write here (forget
+  archives); facts it kept earlier in `chat_memory` are moved in, once, as Tom's own.
+- **The weekly check** runs from Sunday 18:00 London, once a week, from the background timer (or at once from the page). It
+  reads every active memory with the week's notes, Tom's recent corrections and his open tasks; merges duplicates, updates
+  what is out of date, archives what is finished, and asks Tom up to five questions. Its summary is shown on the page.
+- **Everything is visible and reversible.** The page shows the questions, the check, every memory with where it came from
+  and its history, every note, and a log of every change (`memory_log`) by Tom, by a note or by the check.
+- On the first run, what Tom wrote before memory existed (answered questions, feedback, send-back reasons, task briefs,
+  Ask Aimelia messages) is brought in once, with its original date, and learned from ten notes per timer run.
+- A note the AI fails to read is kept and tried again by later runs, three times. Without an AI key, notes are kept but
+  nothing is drawn from them.
 
 ## Email and meetings
 

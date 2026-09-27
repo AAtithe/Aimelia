@@ -150,6 +150,7 @@ export interface Briefing {
   providers: Record<string, boolean>
   channels: Record<string, boolean>
   sources: Record<string, boolean>
+  memory_questions?: number
 }
 
 export class ApiError extends Error {
