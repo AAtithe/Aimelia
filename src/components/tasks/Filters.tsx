@@ -10,8 +10,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api, Task, fmtDate } from '@/lib/client/todo'
 import { StatusPill } from './Cards'
 
-export type Filters = { q: string; view: string; priority: string; kind: string; due: string; closed: string; sort: string }
-export const NO_FILTERS: Filters = { q: '', view: 'open', priority: '', kind: '', due: '', closed: '', sort: '' }
+export type Filters = { q: string; view: string; priority: string; urgent: string; kind: string; due: string; closed: string; sort: string }
+export const NO_FILTERS: Filters = { q: '', view: 'open', priority: '', urgent: '', kind: '', due: '', closed: '', sort: '' }
 
 export const VIEWS: [string, string][] = [
   ['open', 'Open'], ['waiting', 'Waiting on you'], ['team', 'With the team'], ['parked', 'Parked for later'], ['done', 'Completed'], ['all', 'Everything'],
@@ -57,6 +57,9 @@ export function FilterBar({ f, set, full = true, count }: { f: Filters; set: (f:
         <option value="">Any priority</option><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option>
       </select>
       {full && (<>
+        <select value={f.urgent} onChange={on('urgent')} aria-label="Urgency">
+          <option value="">Urgent or not</option><option value="1">Urgent and vital only</option>
+        </select>
         <select value={f.kind} onChange={on('kind')} aria-label="Kind">
           <option value="">Any kind</option><option value="task">Tasks</option><option value="follow_up">Follow-ups</option><option value="routine">From routines</option>
         </select>
@@ -70,8 +73,8 @@ export function FilterBar({ f, set, full = true, count }: { f: Filters; set: (f:
           </select>
         )}
         <select value={f.sort} onChange={on('sort')} aria-label="Sort">
-          <option value="">{f.q ? 'Best match' : f.view === 'done' ? 'Latest completed' : 'Priority'}</option>
-          <option value="priority">Priority</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+          <option value="">{f.q ? 'Best match' : f.view === 'done' ? 'Latest completed' : 'Most urgent first'}</option>
+          <option value="urgency">Most urgent first</option><option value="priority">Priority</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option>
           <option value="due">Due date</option><option value="closed">Latest completed</option>
         </select>
       </>)}

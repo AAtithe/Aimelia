@@ -78,7 +78,14 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
             <div className="o" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <StatusPill status={task.status} />
               {due && <span className={`pill ${due.pill}`}>{due.label}</span>}
+              {task.urgent && <span className="pill Overdue">Urgent and vital</span>}
             </div>
+            {task.urgent && (
+              <div className="note bad" style={{ marginTop: 10 }}>
+                <b>Urgent and vital.</b> {task.urgent_reason || 'No reason given.'}{' '}
+                {task.urgent_by && task.urgent_by !== 'tom' ? `Marked by ${task.urgent_by === 'aimelia' ? 'Aimelia when you added it' : task.urgent_by}; clear it if it is not.` : 'Marked by you.'}
+              </div>
+            )}
             {task.summary && <p className="cap" style={{ marginTop: 8 }}>{task.summary}</p>}
             {task.review_flag && <div className="note bad" style={{ marginTop: 10 }}>{task.review_flag}</div>}
             {task.kind === 'follow_up' && <div className="note info" style={{ marginTop: 10 }}><b>Follow-up.</b> Checks that {task.follow_up_owner || 'the owner'} delivered delegated work.</div>}
@@ -106,6 +113,12 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
                 <button className="btn" disabled={busy}
                   onClick={() => act(() => api(`/tasks/${task.id}`, { method: 'PATCH', body: { status: 'done' } }), 'Task closed.')}>Close the task</button>
               )}
+              {task.status !== 'done' && (task.urgent
+                ? <button className="btn" disabled={busy} onClick={() => act(() => api(`/tasks/${task.id}/urgent`, { method: 'POST', body: { urgent: false } }), 'No longer urgent.')}>Not urgent</button>
+                : <button className="btn danger" disabled={busy} onClick={() => {
+                    const reason = prompt('Why is it urgent and vital? (a few words, optional)') ?? null
+                    if (reason !== null) act(() => api(`/tasks/${task.id}/urgent`, { method: 'POST', body: { urgent: true, reason } }), 'Marked urgent and vital: it is at the top of every list and first for the team.')
+                  }}>Mark urgent and vital</button>)}
               <span className="spacer" />
               <button className="btn danger" disabled={busy} onClick={() => {
                 if (confirm('Delete this task and everything the agents produced for it?'))

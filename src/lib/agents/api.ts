@@ -21,6 +21,8 @@ import { configuredSources, lookup } from './sources'
 import { keepNote } from '../memory/store'
 import { attachFiles, FILE_COLS, fileOut, readTaskFiles } from './documents'
 import { answerQuestion, BLOCKING, dismissQuestion } from './questions'
+import { markUrgent } from './triage'
+import { urgencyOf, urgencySql } from './urgency'
 import { memoryEndpoints } from '../memory/api'
 import { plannerEndpoints } from '../planner/api'
 import { dueBack } from '../planner/projects'
@@ -33,7 +35,8 @@ const provider = z.enum(['auto', 'anthropic', 'openai', 'mock'])
 const cadence = z.enum(['weekly', 'fortnightly', 'monthly', 'quarterly'])
 
 const TaskIn = z.object({ title: z.string().trim().min(1).max(500), notes: z.string().default(''), priority: z.number().int().min(1).max(3).default(2),
-  due_date: ymd.nullable().optional(), run_now: z.boolean().default(true) })
+  due_date: ymd.nullable().optional(), run_now: z.boolean().default(true), urgent: z.boolean().default(false), urgent_reason: z.string().max(300).default('') })
+const Urgent = z.object({ urgent: z.boolean(), reason: z.string().max(300).default('') })
 const TaskPatch = z.object({ title: z.string().trim().min(1).max(500).optional(), notes: z.string().optional(), priority: z.number().int().min(1).max(3).optional(),
   due_date: ymd.nullable().optional(), status: z.enum(['done', 'queued']).optional(),
   planned_for: ymd.nullable().optional(), estimate_minutes: z.number().int().min(5).max(2400).nullable().optional(), project_id: z.string().uuid().nullable().optional() })
@@ -88,6 +91,7 @@ export function taskOut(t: Row) {
     open_questions: t.open_questions ?? 0, ready_actions: t.ready_actions ?? 0, kind: t.kind, parent_id: t.parent_id, routine_id: t.routine_id,
     scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, follow_up_type: t.kind === 'follow_up' ? t.follow_up?.type || 'delegate' : null, closed_at: t.closed_at ? iso(t.closed_at) : null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
     source: t.source ?? null, planned_for: t.planned_for ?? null, estimate_minutes: t.estimate_minutes ?? null, project_id: t.project_id ?? null,
+    urgent: !!t.urgent, urgent_reason: t.urgent_reason ?? null, urgent_by: t.urgent_by ?? null, urgency: urgencyOf(t as any),
   }
 }
 const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status,
@@ -156,18 +160,20 @@ function taskQuery(p: URLSearchParams) {
   if (due === 'overdue') where.push(`t.due_date < ${add(today)} AND t.status <> 'done'`)
   else if (due === 'week') where.push(`t.due_date >= ${add(today)} AND t.due_date <= ${add(addDays(today, 7))}`)
   else if (due === 'none') where.push(`t.due_date IS NULL`)
+  if (p.get('urgent') === '1') where.push(`t.urgent`)
   const closed = Number(p.get('closed'))
   if (closed > 0) where.push(`t.status = 'done' AND ${CLOSED_AT} >= now() - (${add(Math.min(closed, 3650))}::int * interval '1 day')`)
   const sorts: Record<string, string> = {
+    urgency: `${urgencySql()} DESC, t.created_at DESC`,
     priority: 't.priority, t.created_at DESC',
     newest: 't.created_at DESC',
     oldest: 't.created_at',
     due: 't.due_date NULLS LAST, t.priority',
     closed: `${CLOSED_AT} DESC NULLS LAST`,
     // Title matches first, then work still open, then the newest.
-    relevance: `${words.length ? `(t.title ILIKE ${add(`%${words.join(' ')}%`)}) DESC, ` : ''}(t.status = 'done'), t.priority, t.created_at DESC`,
+    relevance: `${words.length ? `(t.title ILIKE ${add(`%${words.join(' ')}%`)}) DESC, ` : ''}(t.status = 'done'), ${urgencySql()} DESC, t.created_at DESC`,
   }
-  const sort = sorts[p.get('sort') || ''] || (words.length ? sorts.relevance : view === 'done' ? sorts.closed : sorts.priority)
+  const sort = sorts[p.get('sort') || ''] || (words.length ? sorts.relevance : view === 'done' ? sorts.closed : sorts.urgency)
   const limit = Math.min(Math.max(Number(p.get('limit')) || 300, 1), 500)
   return { sql: `${TASK_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${sort} LIMIT ${limit}`, vals }
 }
@@ -283,22 +289,23 @@ export const todoEndpoints: Endpoint[] = [
         FROM questions qn JOIN tasks t ON t.id = qn.task_id
         WHERE qn.status = 'open' AND (t.status = 'needs_input' OR EXISTS (SELECT 1 FROM questions c JOIN tasks ct ON ct.id = c.task_id
           WHERE c.merged_into = qn.id AND c.status = 'merged' AND ct.status = 'needs_input'))
-        ORDER BY t.priority, t.created_at, qn.created_at`),
-      q(`SELECT a.*, t.title AS task_title, t.priority AS task_priority, t.review_flag AS task_review_flag FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, t.created_at, a.position`),
+        ORDER BY ${urgencySql()} DESC, t.created_at, qn.created_at`),
+      q(`SELECT a.*, t.title AS task_title, t.priority AS task_priority, t.review_flag AS task_review_flag FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY ${urgencySql()} DESC, t.created_at, a.position`),
       q(`${TASK_SELECT} WHERE t.status = 'failed' ORDER BY t.updated_at DESC`),
       q(`${TASK_SELECT} WHERE t.status = 'due' ORDER BY t.due_date`),
       q(`${TASK_SELECT} WHERE t.kind = 'follow_up' AND t.status = 'scheduled' ORDER BY t.scheduled_for, t.created_at LIMIT 50`),
       q(`SELECT a.*, t.title AS task_title, t.priority AS task_priority FROM actions a JOIN tasks t ON t.id = a.task_id
-         WHERE a.status = 'approved' AND t.status <> 'done' ORDER BY t.priority, a.approved_at NULLS FIRST, a.position`),
+         WHERE a.status = 'approved' AND t.status <> 'done' ORDER BY ${urgencySql()} DESC, a.approved_at NULLS FIRST, a.position`),
       q(`SELECT status, count(*)::int AS n FROM tasks GROUP BY status`),
     ])
     const memoryQuestions = (await one(`SELECT count(*)::int AS n FROM memory_questions WHERE status = 'open'`))?.n ?? 0
     const back = await dueBack()
-    const plannedToday = await q(`${TASK_SELECT} WHERE t.planned_for = $1 AND t.status <> 'done' ORDER BY t.priority`, [londonToday()])
+    const plannedToday = await q(`${TASK_SELECT} WHERE t.planned_for = $1 AND t.status <> 'done' ORDER BY ${urgencySql()} DESC`, [londonToday()])
+    const urgent = await q(`${TASK_SELECT} WHERE t.urgent AND t.status <> 'done' ORDER BY ${urgencySql()} DESC, t.urgent_at`)
     const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, doing: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
     for (const r of counts) c[r.status] = r.n
     return {
-      generated_at: new Date().toISOString(), counts: c,
+      generated_at: new Date().toISOString(), counts: c, urgent: urgent.map(taskOut),
       questions: questions.map((x) => ({ ...questionOut(x), task_title: x.task_title, task_priority: x.task_priority })),
       actions: actions.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_priority: a.task_priority, task_review_flag: a.task_review_flag })),
       failed: failed.map(taskOut), follow_ups: followUps.map((t) => ({ ...taskOut(t), handover: t.follow_up?.handover ?? null })),
@@ -318,6 +325,7 @@ export const todoEndpoints: Endpoint[] = [
     await seedDefaults()
     const t = (await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, $3, $4, now()) RETURNING id`,
       [b.title, b.notes, b.priority, b.due_date ?? null]))!
+    if (b.urgent) await markUrgent(t.id, true, b.urgent_reason, 'tom')
     if (b.notes.trim()) await keepNote('task_brief', `${b.title}\n\n${b.notes}`, { task: b.title }, `task:${t.id}`)
     if (b.run_now) kickQueue()
     return Response.json(await fullTask(t.id), { status: 201 })
@@ -331,7 +339,10 @@ export const todoEndpoints: Endpoint[] = [
     if (!lines.length) fail(422, 'No tasks found in that text.')
     const made: Row[] = []
     for (const it of lines) {
-      made.push((await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, 2, NULL, now()) RETURNING *`, [it.title, it.notes]))!)
+      const t = (await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, 2, NULL, now()) RETURNING *`, [it.title, it.notes]))!
+      // "urgent", "asap" or "!!" in what Tom typed marks it at once.
+      if (it.urgent && (await markUrgent(t.id, true, 'you said it was urgent when you added it', 'tom'))) Object.assign(t, await one(`SELECT urgent, urgent_reason, urgent_by FROM tasks WHERE id = $1`, [t.id]))
+      made.push(t)
     }
     await keepNote('brain_dump', b.text, {}, `dump:${fingerprint(b.text)}`)
     runLater(async () => {
@@ -442,6 +453,14 @@ export const todoEndpoints: Endpoint[] = [
     return fullTask(p.id)
   }],
   ['DELETE', '/tasks/:id', async (_r, p) => { await getTask(p.id); await q(`DELETE FROM tasks WHERE id = $1`, [p.id]) }],
+  ['POST', '/tasks/:id/urgent', async (req, p) => {
+    const b = await body(req, Urgent)
+    const t = await getTask(p.id)
+    await markUrgent(t.id, b.urgent, b.reason, 'tom')
+    await touch(t.id)
+    if (b.urgent && t.status === 'queued') kickQueue()
+    return fullTask(t.id)
+  }],
   ['POST', '/tasks/:id/run', async (_r, p) => { await requeue(p.id, 'manual re-run'); return taskOut(await getTask(p.id)) }],
   ['POST', '/tasks/:id/feedback', async (req, p) => {
     const b = await body(req, Text)

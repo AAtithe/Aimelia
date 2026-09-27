@@ -23,6 +23,8 @@ import { documentsForContext } from './documents'
 import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
 import { BLOCKING, recordQuestions } from './questions'
+import { markUrgent } from './triage'
+import { URGENT_WORDS, urgencySql } from './urgency'
 
 const FOLLOW_UP_INSTRUCTIONS = {
   delegate: 'The work was delegated and has not come back. Draft a short, firm chaser to the owner (kind delegate, same owner, a new due date) and say what Tom should check.',
@@ -126,7 +128,8 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
   const previous = await q(`SELECT title, kind, status, user_feedback FROM actions WHERE task_id = $1 AND status IN ('rejected','approved','done') ORDER BY position`, [task.id])
   const followUp = task.kind === 'follow_up' ? task.follow_up || {} : null
   return {
-    task: { title: task.title, notes: task.notes || '', priority: task.priority, due_date: task.due_date, today: londonToday() },
+    task: { title: task.title, notes: task.notes || '', priority: task.priority, due_date: task.due_date, today: londonToday(),
+      ...(task.urgent ? { urgent_and_vital: task.urgent_reason || true, urgency_rule: 'Tom needs this dealt with first and fast: keep it short and get it moving.' } : {}) },
     answered_questions: questions.filter((x) => x.status === 'answered').map((x) => ({ question: x.question, answer: x.answer })),
     questions_tom_declined: questions.filter((x) => x.status === 'dismissed').map((x) => x.question),
     tom_feedback: feedback.map((e) => e.content?.text).filter(Boolean),
@@ -178,6 +181,9 @@ export async function runTask(taskId: string): Promise<string> {
       const actions = cleanActions(reply.actions)
       if (actions) draft = actions
       if (reply.summary) await q(`UPDATE tasks SET summary = $2 WHERE id = $1`, [taskId, String(reply.summary)])
+      if (reply.urgent && typeof reply.urgent === 'object' && reply.urgent.vital === true) {
+        await markUrgent(taskId, true, String(reply.urgent.reason || ''), agent.name)
+      }
       await logEvent(taskId, 'worker', agent.name, { summary: reply.summary ?? null, actions, seconds: Math.round((Date.now() - started) / 100) / 10 }, attempt)
       const asked = agent.can_ask_questions ? cleanQuestions(reply.questions) : []
       if (asked.length) return pauseForInput(taskId, agent.name, asked, pipeline.max_questions_per_run, attempt)
@@ -259,9 +265,11 @@ const BULLET = /^\s*(?:[-*\u2022]|\d+[.)])\s*/
 
 /** A brain dump taken at its word, with no AI: one task per line, bullets and numbers stripped. */
 export function captureLines(text: string) {
-  return text.split('\n').map((l) => l.replace(BULLET, '').trim()).filter(Boolean).map((line) => line.length <= 200
-    ? { title: line, notes: '' }
-    : { title: `${line.slice(0, 120).replace(/\s+\S*$/, '')} ...`, notes: line })
+  // The urgent marker itself is not part of the title: "URGENT: chase X" becomes "chase X", marked urgent.
+  const unmark = (l: string) => l.replace(/^(?:(?:urgent|asap)\b|!!+)\s*[:!,-]*\s*/i, '').replace(/\s*[-,]?\s*(?:asap|urgent(?:ly)?|!!+)\s*$/i, '').trim() || l
+  return text.split('\n').map((l) => l.replace(BULLET, '').trim()).filter(Boolean).map((raw) => ({ raw, line: unmark(raw) })).map(({ raw, line }) => line.length <= 200
+    ? { title: line, notes: '', urgent: URGENT_WORDS.test(raw) }
+    : { title: `${line.slice(0, 120).replace(/\s+\S*$/, '')} ...`, notes: line, urgent: URGENT_WORDS.test(raw) })
 }
 
 /**
@@ -279,8 +287,10 @@ export async function refineCapture(text: string, taskIds: string[]) {
     if (it && id) {
       await q(`UPDATE tasks SET title = $2, notes = CASE WHEN $3 <> '' THEN $3 ELSE notes END, priority = $4, due_date = COALESCE($5, due_date), updated_at = now() WHERE id = $1`,
         [id, it.title, it.notes, it.priority, it.due_date])
+      if (it.urgent) await markUrgent(id, true, it.urgent_reason, 'aimelia')
     } else if (it) {
-      await q(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, $3, $4, now())`, [it.title, it.notes, it.priority, it.due_date])
+      const made = await one(`INSERT INTO tasks (title, notes, priority, due_date, last_touched_at) VALUES ($1, $2, $3, $4, now()) RETURNING id`, [it.title, it.notes, it.priority, it.due_date])
+      if (it.urgent && made) await markUrgent(made.id, true, it.urgent_reason, 'aimelia')
     } else {
       await q(`DELETE FROM tasks WHERE id = $1`, [id])
     }
@@ -302,12 +312,13 @@ export async function splitCapture(text: string) {
     console.error('Capture split failed, falling back to lines', (e as Error).message)
     reply = { tasks: captureLines(text) }
   }
-  const out: { title: string; notes: string; priority: number; due_date: string | null }[] = []
+  const out: { title: string; notes: string; priority: number; due_date: string | null; urgent: boolean; urgent_reason: string }[] = []
   for (const t of Array.isArray(reply.tasks) ? reply.tasks : []) {
     if (!t || !String(t.title || '').trim()) continue
     const pr = parseInt(t.priority, 10)
     const due = typeof t.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.due_date) ? t.due_date : null
-    out.push({ title: String(t.title).trim().slice(0, 500), notes: String(t.notes || ''), priority: Number.isFinite(pr) ? Math.min(Math.max(pr, 1), 3) : 2, due_date: due })
+    out.push({ title: String(t.title).trim().slice(0, 500), notes: String(t.notes || ''), priority: Number.isFinite(pr) ? Math.min(Math.max(pr, 1), 3) : 2, due_date: due,
+      urgent: t.urgent === true, urgent_reason: String(t.urgent_reason || '').slice(0, 300) })
   }
   return out
 }
@@ -321,7 +332,7 @@ export async function claimNext(): Promise<string | null> {
      WHERE id = (SELECT id FROM tasks WHERE status = 'queued'
                    -- a task waits while its documents are being read
                    AND NOT EXISTS (SELECT 1 FROM task_files f WHERE f.task_id = tasks.id AND f.status = 'reading')
-                 ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+                 ORDER BY ${urgencySql().replace(/\bt\./g, 'tasks.')} DESC, created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING id`)
   return row?.id ?? null
 }
