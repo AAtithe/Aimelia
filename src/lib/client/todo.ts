@@ -13,8 +13,14 @@ export interface Question {
   question: string
   why: string
   answer: string | null
-  status: 'open' | 'answered' | 'dismissed'
+  status: 'open' | 'merged' | 'answered' | 'dismissed'
   created_at: string
+  updated_at?: string | null
+  answered_by?: string | null
+  suggested_answer?: string | null
+  suggested_from?: string | null
+  also_for?: { task_id: string; title: string }[]
+  shared_with?: { question_id: string; task_id: string; title: string }
 }
 
 export interface Action {

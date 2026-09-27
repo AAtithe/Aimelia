@@ -21,6 +21,7 @@ import {
 import { lessonsForContext } from './lessons'
 import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
+import { BLOCKING, recordQuestions } from './questions'
 
 export const ACTION_KINDS = new Set(['email_draft', 'document', 'checklist', 'decision', 'call', 'delegate', 'note'])
 
@@ -205,14 +206,10 @@ export async function runTask(taskId: string): Promise<string> {
 }
 
 async function pauseForInput(taskId: string, askedBy: string, asked: AskedQuestion[], limit: number, attempt: number): Promise<string> {
-  const known = new Set((await q(`SELECT lower(trim(question)) AS k FROM questions WHERE task_id = $1`, [taskId])).map((r) => r.k))
   const toAsk = asked.slice(0, Math.max(limit, 1))
-  for (const qn of toAsk) {
-    if (known.has(qn.question.trim().toLowerCase())) continue
-    await q(`INSERT INTO questions (task_id, asked_by, question, why) VALUES ($1, $2, $3, $4)`, [taskId, askedBy, qn.question, qn.why])
-  }
+  await recordQuestions(taskId, askedBy, toAsk)
   await logEvent(taskId, 'question', askedBy, { questions: toAsk }, attempt)
-  const open = await one(`SELECT 1 FROM questions WHERE task_id = $1 AND status = 'open' LIMIT 1`, [taskId])
+  const open = await one(`SELECT 1 FROM questions WHERE task_id = $1 AND status IN ${BLOCKING} LIMIT 1`, [taskId])
   if (!open) {
     // Every question was a repeat of one already answered or declined: flag it rather than loop.
     await q(`UPDATE tasks SET status = 'failed' WHERE id = $1`, [taskId])

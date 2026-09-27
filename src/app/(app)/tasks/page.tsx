@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type Task } from '@/lib/client/todo'
 import { Shell } from '@/components/Shell'
-import { BrainDump, TaskTable } from '@/components/tasks/Shared'
+import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
 
 export default function AllTasks() {
@@ -24,7 +24,6 @@ export default function AllTasks() {
 
   return (
     <Shell title="All tasks" sub="Everything on the list, where it is, and what it is waiting for.">
-      <BrainDump onAdded={load} />
       <div className="card">
         <h2>All tasks <span className="hcount">{tasks ? tasks.length : ''}</span></h2>
         <div className="body" style={{ paddingTop: 8, paddingBottom: 8 }}>
@@ -33,6 +32,7 @@ export default function AllTasks() {
         {!tasks ? <div className="emptyrow">Reading ...</div> : tasks.length === 0 ? <div className="emptyrow">No tasks {showDone ? 'at all' : 'open'} yet.</div> : <TaskTable tasks={tasks} onOpen={setOpenTask} />}
       </div>
       <div className={`msg ${err ? 'err' : ''}`}>{err}</div>
+      <CaptureBar onAdded={load} />
       {openTask && <TaskDetail taskId={openTask} onClose={() => { setOpenTask(null); load() }} onChanged={load} />}
     </Shell>
   )

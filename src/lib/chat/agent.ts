@@ -33,7 +33,8 @@ import { addressOf, getMessage, type GraphMessage } from '../email/mail'
 import { createDraft, createReplyDraft } from '../email/drafting'
 import { connection, graph } from '../microsoft'
 import { bookFocus } from '../agents/calendarBlocks'
-import { resumeIfAnswered } from '../agents/api'
+import { settle } from '../agents/api'
+import { answerQuestion } from '../agents/questions'
 import { getPipeline, logEvent, processQueue, seedDefaults } from '../agents/orchestrator'
 import { touch } from '../agents/schedule'
 import { CATALOGUE, compact, configuredSources, lookup } from '../agents/sources'
@@ -135,14 +136,12 @@ export const TOOLS: Record<string, Tool> = {
       const answer = String(a.answer || '').trim()
       const qn = await one(`SELECT * FROM questions WHERE id::text = $1`, [String(a.question_id || '')])
       if (!qn) return 'No question with that id.'
-      if (qn.status !== 'open') return 'That question has already been dealt with.'
+      if (qn.status !== 'open' && qn.status !== 'merged') return 'That question has already been dealt with.'
       if (!answer) return 'Not answered: the answer is empty.'
-      await q(`UPDATE questions SET answer = $2, status = 'answered', answered_at = now() WHERE id = $1`, [qn.id, answer])
-      await touch(qn.task_id)
-      await logEvent(qn.task_id, 'answer', 'tom', { question: qn.question, answer, via: 'chat' })
-      await keepNote('answer', answer, { question: qn.question, via: 'chat' }, `question:${qn.id}`)
-      const resumed = await resumeIfAnswered(qn.task_id, 'questions answered')
-      return { answered: true, task_back_with_agents: resumed }
+      const r = (await answerQuestion(qn.id, answer, { via: 'chat' }))!
+      await keepNote('answer', answer, { question: r.head.question, via: 'chat' }, `question:${r.head.id}`)
+      const resumed = await settle(r.tasks, 'questions answered')
+      return { answered: true, task_back_with_agents: resumed.includes(qn.task_id), tasks_it_settled: r.tasks.length }
     },
   },
   search_memory: {

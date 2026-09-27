@@ -1,11 +1,18 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Briefing, type Task, dueState } from '@/lib/client/todo'
+import { api, type Briefing, type Question, type Task, dueState } from '@/lib/client/todo'
 import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem } from '@/components/tasks/Cards'
-import { BrainDump, TaskTable } from '@/components/tasks/Shared'
+import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+
+/** Questions on the same task sit together, in the order the briefing gives them. */
+function byTask(questions: Question[]) {
+  const groups = new Map<string, Question[]>()
+  for (const q of questions) groups.set(q.task_id, [...(groups.get(q.task_id) || []), q])
+  return [...groups.values()]
+}
 
 export default function Today() {
   const { refreshBrief } = useShell()
@@ -61,10 +68,14 @@ export default function Today() {
       {noKeys && <div className="note warn">No AI key is set on the server, so the agents are giving placeholder answers. Add an AI key in <a href="/settings">Settings</a>.</div>}
       {!brief ? <p className="cap">Reading your briefing ...</p> : (
         <>
-          <BrainDump onAdded={load} />
           {brief.questions.length > 0 && (
             <div className="card"><h2>Answer these so the team can finish <span className="hcount">{brief.questions.length}</span></h2>
-              {brief.questions.map((q) => <QuestionItem key={q.id} q={q} onDone={load} />)}</div>
+              {byTask(brief.questions).map((g) => g.length === 1 ? <QuestionItem key={g[0].id} q={g[0]} onDone={load} /> : (
+                <div key={g[0].task_id} className="qgroup">
+                  <div className="qgroup-h"><span className="tag">{g[0].task_title}</span><span className="cap">{g.length} questions on this task</span></div>
+                  {g.map((q) => <QuestionItem key={q.id} q={q} onDone={load} showTask={false} />)}
+                </div>
+              ))}</div>
           )}
           {brief.follow_ups.length > 0 && (
             <div className="card"><h2>Delegated work due back <span className="hcount">{brief.follow_ups.length}</span></h2>
@@ -79,10 +90,11 @@ export default function Today() {
               <TaskTable tasks={brief.failed} onOpen={setOpenTask} /></div>
           )}
           {waiting === 0 && brief.failed.length === 0 && (
-            <div className="note info"><b>Nothing is waiting for you.</b> {working ? `The team is working on ${working} task${working === 1 ? '' : 's'}; results appear here once they are checked.` : 'Add to the list above and the team will start.'}</div>
+            <div className="note info"><b>Nothing is waiting for you.</b> {working ? `The team is working on ${working} task${working === 1 ? '' : 's'}; results appear here once they are checked.` : 'Type into the bar at the bottom and the team will start.'}</div>
           )}
         </>
       )}
+      <CaptureBar onAdded={load} />
       {openTask && <TaskDetail taskId={openTask} onClose={() => { setOpenTask(null); load() }} onChanged={load} />}
     </Shell>
   )

@@ -21,6 +21,26 @@ the task, approving Drop closes it. Routines create recurring work ahead of time
 through Triage; Tom's edits and send-backs become lessons every agent sees. Facts can come from WSCIP and Payroll Command
 Center through a fixed list of read-only lookups.
 
+## Questions for Tom
+
+`src/lib/agents/questions.ts`. The questions the agents are waiting on are kept as one list, so Tom answers each thing once.
+
+- When an agent asks, anything that repeats a question already on that task (open, answered or skipped), in the same or
+  nearly the same words, is dropped.
+- One question can stand for several tasks. The kept one stays open and the others are merged into it; they still hold
+  their tasks. Answering or skipping it on any of those tasks settles all of them, and each task with nothing left open
+  goes back to the team. Today shows the question once, tagged with every task it covers, and groups a task's questions
+  together.
+- **The tidy job** runs on every background tick when the list has changed since the last run, and needs an AI key. The AI
+  reads every open question with its task, Tom's answers from the last 120 days and what Aimelia knows. It merges questions
+  that one answer would settle (across tasks too), rewords any that newer answers have made out of date, and answers any
+  Tom has in fact already answered. An answer it is sure of is applied and marked as answered by Aimelia, with where it came
+  from; one it is less sure of is shown under the question as a suggestion Tom can use with one click. Every change is in
+  the task's log.
+- Repairs run every tick without the AI: a group whose lead task was deleted or closed passes to the next task in it,
+  and repeats on one task are merged. A task that goes stale and back through Triage hands any group it led to the next
+  task.
+
 ## Ask Aimelia: the chat agent
 
 A chatbot Tom can talk to about his work, as a page (`/chat`, first in My work) and as a drawer opened by the Ask Aimelia
@@ -45,7 +65,7 @@ knows (below) the memories Tom set or checked, his standing preferences, and tho
 | search_tasks, get_task | Find tasks by words or status; read one with its draft actions and questions |
 | create_task | Adds a task for the agent team (source `chat`), as Add task does |
 | update_task | Changes title, notes (or adds a line), priority, due date; closes a task or sends it back to the agents |
-| answer_question | Answers an open agent question; the task goes back to the team once none are left, as the button does |
+| answer_question | Answers an open agent question, and every question merged with it; each task goes back to the team once none are left, as the button does |
 | calculate | Exact arithmetic (`src/lib/chat/calc.ts`, a parser, never eval): VAT, margins, labour %, variances. Every figure goes through it |
 | web_search | Claude's server-side web search, on the chat model; the answer comes back with its sources. Needs the Claude key |
 | remember, forget | Standing facts and preferences, kept across conversations |

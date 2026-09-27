@@ -165,6 +165,11 @@ export function setModelTransport(t: Transport | null) {
   transport = t || realTransport
 }
 
+/** Whether a call would reach a model that can judge meaning: a key is set, or a test has put in its own transport. */
+export function canJudge() {
+  return resolveProvider('auto') !== 'mock' || transport !== realTransport
+}
+
 export async function complete(call: ModelCall): Promise<string> {
   const provider = resolveProvider(call.provider)
   const model = resolveModel(provider, call.model)

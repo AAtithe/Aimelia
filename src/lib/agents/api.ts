@@ -19,6 +19,7 @@ import { csvItems, fingerprint, jobState, queueImport, recentJobs, runImportJobs
 import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
 import { keepNote } from '../memory/store'
+import { answerQuestion, BLOCKING, dismissQuestion } from './questions'
 import { memoryEndpoints } from '../memory/api'
 
 // ---------------------------------------------------------------- schemas
@@ -68,7 +69,7 @@ const LessonPatch = z.object({ active: z.boolean() })
 // ---------------------------------------------------------------- serialisers
 
 const TASK_SELECT = `SELECT t.*,
-  (SELECT count(*)::int FROM questions qn WHERE qn.task_id = t.id AND qn.status = 'open') AS open_questions,
+  (SELECT count(*)::int FROM questions qn WHERE qn.task_id = t.id AND qn.status IN ${BLOCKING}) AS open_questions,
   (SELECT count(*)::int FROM actions a WHERE a.task_id = t.id AND a.status = 'proposed') AS ready_actions FROM tasks t`
 
 export function taskOut(t: Row) {
@@ -80,7 +81,11 @@ export function taskOut(t: Row) {
     source: t.source ?? null,
   }
 }
-const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status, created_at: iso(x.created_at) })
+const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status,
+  created_at: iso(x.created_at), updated_at: x.updated_at ? iso(x.updated_at) : null, answered_by: x.answered_by ?? null,
+  suggested_answer: x.suggested_answer ?? null, suggested_from: x.suggested_from ?? null, also_for: x.also_for ?? [],
+  // A merged question reads as the one it was merged into, which is what Tom answers.
+  ...(x.status === 'merged' && x.shared_question ? { question: x.shared_question, why: x.shared_why || x.why, shared_with: { question_id: x.merged_into, task_id: x.shared_task_id, title: x.shared_task } } : {}) })
 const actionOut = (a: Row) => ({ id: a.id, task_id: a.task_id, kind: a.kind, title: a.title, content: a.content, details: a.details || {}, status: a.status,
   review_status: a.review_status, review_score: a.review_score, review_notes: a.review_notes, user_feedback: a.user_feedback, created_at: iso(a.created_at) })
 const eventOut = (e: Row) => ({ id: e.id, kind: e.kind, actor: e.actor, attempt: e.attempt, content: e.content, created_at: iso(e.created_at) })
@@ -109,7 +114,11 @@ async function getTask(id: string): Promise<Row> {
 export async function fullTask(id: string) {
   const t = await getTask(id)
   const [questions, actions, events] = await Promise.all([
-    q(`SELECT * FROM questions WHERE task_id = $1 ORDER BY created_at`, [id]),
+    q(`SELECT qn.*, h.question AS shared_question, h.why AS shared_why, h.task_id AS shared_task_id, ht.title AS shared_task,
+      COALESCE((SELECT json_agg(json_build_object('task_id', ct.id, 'title', ct.title) ORDER BY c.created_at) FROM questions c JOIN tasks ct ON ct.id = c.task_id
+    WHERE c.merged_into = qn.id AND c.status = 'merged' AND c.task_id <> qn.task_id), '[]'::json) AS also_for
+      FROM questions qn LEFT JOIN questions h ON h.id = qn.merged_into LEFT JOIN tasks ht ON ht.id = h.task_id
+      WHERE qn.task_id = $1 ORDER BY qn.created_at`, [id]),
     q(`SELECT * FROM actions WHERE task_id = $1 AND status <> 'superseded' ORDER BY position`, [id]),
     q(`SELECT * FROM events WHERE task_id = $1 ORDER BY created_at`, [id]),
   ])
@@ -192,7 +201,14 @@ export const todoEndpoints: Endpoint[] = [
   ['GET', '/briefing', async () => {
     await seedDefaults()
     const [questions, actions, failed, followUps, counts] = await Promise.all([
-      q(`SELECT qn.*, t.title AS task_title FROM questions qn JOIN tasks t ON t.id = qn.task_id WHERE qn.status = 'open' AND t.status = 'needs_input' ORDER BY t.priority, qn.created_at`),
+      // One entry per open question, with the other tasks it also holds. It shows while any of them waits on Tom.
+      q(`SELECT qn.*, t.title AS task_title, t.priority AS task_priority,
+        COALESCE((SELECT json_agg(json_build_object('task_id', ct.id, 'title', ct.title) ORDER BY c.created_at) FROM questions c JOIN tasks ct ON ct.id = c.task_id
+    WHERE c.merged_into = qn.id AND c.status = 'merged' AND c.task_id <> qn.task_id), '[]'::json) AS also_for
+        FROM questions qn JOIN tasks t ON t.id = qn.task_id
+        WHERE qn.status = 'open' AND (t.status = 'needs_input' OR EXISTS (SELECT 1 FROM questions c JOIN tasks ct ON ct.id = c.task_id
+          WHERE c.merged_into = qn.id AND c.status = 'merged' AND ct.status = 'needs_input'))
+        ORDER BY t.priority, t.created_at, qn.created_at`),
       q(`SELECT a.*, t.title AS task_title, t.review_flag AS task_review_flag FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, t.created_at, a.position`),
       q(`${TASK_SELECT} WHERE t.status = 'failed' ORDER BY t.updated_at DESC`),
       q(`${TASK_SELECT} WHERE t.status = 'due' ORDER BY t.due_date`),
@@ -369,16 +385,15 @@ export const todoEndpoints: Endpoint[] = [
 
   ['POST', '/questions/:id/answer', async (req, p) => {
     const b = await body(req, Answer)
-    const qn = (await one(`UPDATE questions SET answer = $2, status = 'answered', answered_at = now() WHERE id = $1 RETURNING *`, [p.id, b.answer])) || fail(404, 'Question not found.')
-    await touch(qn!.task_id)
-    await logEvent(qn!.task_id, 'answer', 'tom', { question: qn!.question, answer: b.answer })
-    await keepNote('answer', b.answer, { question: qn!.question, task: (await one(`SELECT title FROM tasks WHERE id = $1`, [qn!.task_id]))?.title }, `question:${qn!.id}`)
-    return { question: questionOut(qn!), task_resumed: await resumeIfAnswered(qn!.task_id, 'questions answered') }
+    const r = (await answerQuestion(p.id, b.answer)) || fail(404, 'Question not found.')
+    await keepNote('answer', b.answer, { question: r!.head.question, task: (await one(`SELECT title FROM tasks WHERE id = $1`, [r!.head.task_id]))?.title }, `question:${r!.head.id}`)
+    const resumed = await settle(r!.tasks, 'questions answered')
+    return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length }
   }],
   ['POST', '/questions/:id/dismiss', async (_r, p) => {
-    const qn = (await one(`UPDATE questions SET status = 'dismissed' WHERE id = $1 RETURNING *`, [p.id])) || fail(404, 'Question not found.')
-    await touch(qn!.task_id)
-    return { question: questionOut(qn!), task_resumed: await resumeIfAnswered(qn!.task_id, 'questions dismissed') }
+    const r = (await dismissQuestion(p.id)) || fail(404, 'Question not found.')
+    const resumed = await settle(r!.tasks, 'questions dismissed')
+    return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length }
   }],
 
   ['PATCH', '/actions/:id', async (req, p) => {
@@ -533,6 +548,16 @@ export const todoEndpoints: Endpoint[] = [
   }],
   ...memoryEndpoints,
 ]
+
+/** After Tom settles a question: every task it held counts as touched, and those with nothing left open go back to the team. */
+export async function settle(taskIds: string[], reason: string) {
+  const resumed: string[] = []
+  for (const id of taskIds) {
+    await touch(id)
+    if (await resumeIfAnswered(id, reason)) resumed.push(id)
+  }
+  return resumed
+}
 
 export async function resumeIfAnswered(taskId: string, reason: string): Promise<boolean> {
   const t = await getTask(taskId)

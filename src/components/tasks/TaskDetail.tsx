@@ -55,8 +55,8 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
     }
   }
 
-  const open = task?.questions?.filter((q) => q.status === 'open') || []
-  const answered = task?.questions?.filter((q) => q.status !== 'open') || []
+  const open = task?.questions?.filter((q) => q.status === 'open' || q.status === 'merged') || []
+  const answered = task?.questions?.filter((q) => q.status === 'answered' || q.status === 'dismissed') || []
   const live = task?.actions?.filter((a) => a.status === 'proposed') || []
   const history = task?.actions?.filter((a) => a.status !== 'proposed') || []
   const due = task ? dueState(task.due_date, task.status) : null
@@ -159,7 +159,7 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
               <h3>Answered</h3>
               <ul className="log">
                 {answered.map((q) => (
-                  <li key={q.id}><div>{q.question}</div><div className="cap" style={{ margin: 0 }}>{q.status === 'dismissed' ? 'Skipped: the team used its judgement' : q.answer}</div></li>
+                  <li key={q.id}><div>{q.question}</div><div className="cap" style={{ margin: 0 }}>{q.status === 'dismissed' ? 'Skipped: the team used its judgement' : q.answered_by === 'aimelia' ? `${q.answer} (answered by Aimelia from what you said before)` : q.answer}</div></li>
                 ))}
               </ul>
             </>)}
@@ -186,7 +186,8 @@ function EventRow({ e }: { e: AgentEvent }) {
   if (e.kind === 'worker') text = `${c.summary || 'Worked on the draft'}${c.actions ? ` (${c.actions.length} action${c.actions.length === 1 ? '' : 's'})` : ''}`
   else if (e.kind === 'review') text = `${c.approved ? 'Approved' : 'Sent back'} at ${c.score}/10. ${c.feedback || ''}`
   else if (e.kind === 'question') text = `Asked you: ${(c.questions || []).map((q: any) => q.question).join(' | ')}`
-  else if (e.kind === 'answer') text = `You answered "${c.question}": ${c.answer}`
+  else if (e.kind === 'answer') text = e.actor === 'aimelia' ? `Answered "${c.question}" from what you said before${c.source ? ` (${c.source})` : ''}: ${c.answer}` : `You answered "${c.question}": ${c.answer}${c.shared_with ? ` (also settled ${c.shared_with} shared question${c.shared_with === 1 ? '' : 's'})` : ''}`
+  else if (e.kind === 'question_update') text = c.text
   else if (e.kind === 'feedback') text = c.text
   else if (e.kind === 'error') text = c.error
   else if (e.kind === 'lookup') text = c.error ? `Could not look anything up: ${c.error}` : `Looked up ${(c.calls || []).map((x: any) => `${x.call}${x.error ? ' (failed)' : ''}${x.why ? `: ${x.why}` : ''}`).join('; ')}`

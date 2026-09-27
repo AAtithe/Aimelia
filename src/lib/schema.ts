@@ -41,6 +41,13 @@ export const SCHEMA: string[] = [
     answered_at timestamptz
   )`,
   `CREATE INDEX IF NOT EXISTS questions_task_idx ON questions (task_id)`,
+  // One question can stand for several: the others are merged into it and settle with it.
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS merged_into uuid REFERENCES questions(id) ON DELETE SET NULL`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS updated_at timestamptz`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answered_by text`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS suggested_answer text`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS suggested_from text`,
+  `CREATE INDEX IF NOT EXISTS questions_merged_idx ON questions (merged_into) WHERE merged_into IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS actions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
