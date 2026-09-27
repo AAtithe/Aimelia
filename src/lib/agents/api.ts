@@ -1,6 +1,7 @@
 /**
  * Agent Tasks API, mounted at /api/todo. Every endpoint needs the session cookie or X-Aimelia-Key.
  */
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { iso, json, one, q, type Row } from '../db'
 import { body, fail } from '../http'
@@ -15,7 +16,7 @@ import { buildBrief, channels, send } from './notify'
 import { getPipeline, logEvent, processQueue, seedDefaults, splitCapture } from './orchestrator'
 import { deferTask, firstDue, scheduleFollowUp, touch, type Cadence } from './schedule'
 import { csvItems, extractActions, fingerprint, firefliesMeetings, importFireflies, importHistory, importTodo, listItems, saveImport, todoLists, type Saved } from './imports'
-import { fileToText, ImportError, IMPORT_TYPES } from './importText'
+import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
 
 // ---------------------------------------------------------------- schemas
@@ -236,14 +237,24 @@ export const todoEndpoints: Endpoint[] = [
   ['POST', '/import/file', async (req) => {
     const b = await body(req, ImportFile)
     await seedDefaults()
+    const buf = Buffer.from(b.data, 'base64')
+    const title = b.filename.replace(/\.[a-z0-9]+$/i, '')
+    let pdf = false
+    try { pdf = isPdf(b.filename, buf) } catch (e) { fail(415, (e as Error).message) }
+    if (pdf) {
+      // Claude reads the PDF itself; a list PDF is still read for its tasks, one per item.
+      const kind = b.kind === 'meeting' ? 'meeting' : 'document'
+      const items = await extractActions('', kind, title, buf.toString('base64'))
+      if (!items.length) fail(422, 'No actions found in that PDF.')
+      return importReply(await saveImport({ source: kind, ref: createHash('sha256').update(buf).digest('hex').slice(0, 32), title, items, force: b.force }), b.run_now)
+    }
     let text: string
-    try { text = fileToText(b.filename, Buffer.from(b.data, 'base64')) } catch (e) {
+    try { text = fileToText(b.filename, buf) } catch (e) {
       if (e instanceof ImportError) fail(415, e.message)
       fail(422, 'That file could not be read. If it is a Word document, open it and save it again as .docx.')
     }
     const csv = /\.csv$/i.test(b.filename)
     const kind = b.kind ?? (csv ? 'list' : /\.(vtt|srt)$/i.test(b.filename) ? 'meeting' : 'document')
-    const title = b.filename.replace(/\.[a-z0-9]+$/i, '')
     const items = await importItems(text!, kind, title, csv)
     return importReply(await saveImport({ source: kind, ref: fingerprint(text!), title, items, force: b.force }), b.run_now)
   }],

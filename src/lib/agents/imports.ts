@@ -4,6 +4,8 @@
  *
  * - Documents and meetings are read by the AI, which keeps only the actions. Without an AI key the
  *   bullets, numbered items and "Action:" lines are taken instead, so nothing is lost.
+ * - PDFs go to Claude whole, as a document, so scanned pages and tables are read too. They need the
+ *   Claude key; there is no fallback, because without Claude there is no text to fall back to.
  * - A list (To Do, Outlook tasks CSV, pasted lines) is already tasks: one task per item, no AI.
  * - Every import is recorded by source and reference, so the same document, meeting or To Do task
  *   is never imported twice by accident. The record is claimed before any task is written.
@@ -37,17 +39,20 @@ export const fingerprint = (text: string) => createHash('sha256').update(text.re
 // ---------------------------------------------------------------- reading actions out of text
 
 /** The actions in a document or meeting, as tasks. Owners other than Tom are kept in the notes so Triage can delegate. */
-export async function extractActions(text: string, kind: 'document' | 'meeting', title: string): Promise<Item[]> {
+export async function extractActions(text: string, kind: 'document' | 'meeting', title: string, pdf?: string): Promise<Item[]> {
   const pipeline = await getPipeline()
+  if (pdf && !env.anthropicKey()) fail(503, 'Reading PDFs needs the Claude (Anthropic) API key. Add it in Settings, or copy the text out of the PDF and paste it.')
   const clipped = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n[... the rest was cut to fit]` : text
   let reply: any
   try {
     reply = await completeJson({
-      provider: 'auto', role: 'import', temperature: 0.2, maxTokens: 8000,
+      provider: pdf ? 'anthropic' : 'auto', role: 'import', temperature: 0.2, maxTokens: 8000, pdf,
       system: `${IMPORT_PROMPT}\n\nHouse rules:\n${pipeline.house_rules}\n\nTom's team:\n${pipeline.team_directory || '(not given)'}`,
-      payload: { source: kind === 'meeting' ? 'meeting notes or transcript' : 'document', title, today: londonToday(), text: clipped },
+      payload: { source: kind === 'meeting' ? 'meeting notes or transcript' : 'document', title, today: londonToday(),
+        text: pdf ? '(The document is the attached PDF. Read every page, including tables and scanned pages.)' : clipped },
     })
   } catch (e) {
+    if (pdf) fail(502, `Claude could not read that PDF: ${(e as Error).message}`)
     // Never lose an import because the AI is down: take the lines that look like actions.
     console.error('Import extraction failed, falling back to marked lines', (e as Error).message)
     reply = { tasks: actionLines(text, MAX_TASKS).map((t) => ({ title: t })) }

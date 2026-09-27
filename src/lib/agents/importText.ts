@@ -5,13 +5,21 @@
  *   and paragraphs, list items, line breaks and table cells are kept as lines.
  * - Transcripts (.vtt, .srt) lose their cue numbers and timings.
  * - .txt, .md and .csv are read as they are.
- * - The old binary .doc and PDF are refused with a message saying what to do instead.
+ * - PDFs are not turned into text here: they go to Claude whole (see isPdf and imports.ts).
+ * - The old binary .doc is refused with a message saying what to do instead.
  */
 import { inflateRawSync } from 'node:zlib'
 
 export class ImportError extends Error {}
 
-export const IMPORT_TYPES = ['.docx', '.txt', '.md', '.csv', '.vtt', '.srt']
+export const IMPORT_TYPES = ['.docx', '.pdf', '.txt', '.md', '.csv', '.vtt', '.srt']
+
+/** A PDF by name, checked by its header so a renamed file is not sent to Claude. */
+export function isPdf(filename: string, buf: Buffer): boolean {
+  if (!/\.pdf$/i.test(filename)) return false
+  if (buf.subarray(0, 1024).indexOf('%PDF-') < 0) throw new ImportError('That file is named .pdf but is not a PDF.')
+  return true
+}
 
 /** The files inside a zip, by name, inflated on request. */
 function unzip(buf: Buffer): Map<string, () => Buffer> {
@@ -102,7 +110,6 @@ export function fileToText(filename: string, buf: Buffer): string {
   const ext = (filename.toLowerCase().match(/\.[a-z0-9]+$/) || [''])[0]
   if (ext === '.docx') return docxToText(buf)
   if (ext === '.doc') throw new ImportError('That is an old Word file (.doc). Open it in Word, save it as .docx, and try again.')
-  if (ext === '.pdf') throw new ImportError('PDFs are not read yet. Copy the text out of the PDF and paste it in as meeting notes.')
   const text = buf.toString('utf8').replace(/^﻿/, '')
   if (ext === '.vtt' || ext === '.srt') return transcriptToText(text)
   if (IMPORT_TYPES.includes(ext) || !ext) return text

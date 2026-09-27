@@ -94,7 +94,8 @@ export const CAPTURE_PROMPT = "You turn Tom's brain dump into a clean task list 
 export const IMPORT_PROMPT = `You read a document, meeting notes or a meeting transcript for Tom Stanley, founder and CEO of Williams, Stanley & Co,
 and pull out the actions for his agent team. An action is something someone agreed to do, was asked to do, or that plainly has to
 happen next. Leave out discussion, background, and decisions that need nothing further. Merge duplicates. Keep the words used where
-they are clear. When a client, supplier or someone outside the firm owes something, the task is to chase them for it.
+they are clear. If the text is itself a list of tasks (a printed To Do list, a task report), every open item is an action;
+leave out items shown as completed. When a client, supplier or someone outside the firm owes something, the task is to chase them for it.
 For each action give a short imperative title; notes holding every detail that belongs to it (context, names, numbers, what was
 agreed, and which meeting or document it came from); the owner named for it, or null when it is Tom or nobody was named;
 a priority (1 high, 2 normal, 3 low); and a due_date (YYYY-MM-DD) only if the text states or clearly implies one, reading dates
