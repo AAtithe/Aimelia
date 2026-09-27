@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { api, Task, PRIORITY_LABEL, dueState, fmtDate } from '@/lib/client/todo'
 import { StatusPill, VoiceButton } from './Cards'
+import { attachToTask } from './Documents'
 
 export function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => void }) {
   return (
@@ -54,6 +55,8 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
   const [title, setTitle] = useState('')
   const [priority, setPriority] = useState(2)
   const [due, setDue] = useState('')
+  const [docs, setDocs] = useState<File[]>([])
+  const [docsKey, setDocsKey] = useState(0)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const box = useRef<HTMLTextAreaElement>(null)
@@ -81,9 +84,13 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
     setMsg(null)
     try {
       if (one) {
-        await api('/tasks', { method: 'POST', body: { title, notes: text, priority, due_date: due || null } })
-        setMsg({ ok: true, text: 'Added. The team is on it.' })
-        setTitle(''); setText(''); setDue(''); setPriority(2)
+        // With documents, the task waits for them to be read before the team starts.
+        const t = await api<Task>('/tasks', { method: 'POST', body: { title, notes: text, priority, due_date: due || null, run_now: !docs.length } })
+        if (docs.length) {
+          try { await attachToTask(t.id, docs) } catch (e: any) { setMsg({ ok: false, text: `The task was added, but the documents were not: ${e.message} Attach them from the task.` }); onAdded(); return }
+        }
+        setMsg({ ok: true, text: docs.length ? `Added with ${docs.length} document${docs.length === 1 ? '' : 's'}. Claude reads and assesses them, then the team works them through.` : 'Added. The team is on it.' })
+        setTitle(''); setText(''); setDue(''); setPriority(2); setDocs([]); setDocsKey((k) => k + 1)
       } else {
         const made = await api<Task[]>('/capture', { method: 'POST', body: { text } })
         setMsg({ ok: true, text: made.length === 1 ? `Added "${made[0].title}". The team is on it.`
@@ -141,6 +148,10 @@ export function CaptureBar({ onAdded }: { onAdded: () => void }) {
                     <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
                   </label>
                 </div>
+                <label className="fld"><span>Documents to read and assess (optional): policies, procedures, letters, photos of paperwork</span>
+                  <input key={docsKey} type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.vtt,.srt,.png,.jpg,.jpeg,.gif,.webp"
+                    onChange={(e) => setDocs(Array.from(e.target.files || []))} />
+                </label>
               </>
             )}
           </div>

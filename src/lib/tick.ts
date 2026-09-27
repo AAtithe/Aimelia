@@ -4,6 +4,7 @@ import { createDueRoutines, nudgeStale, wakeScheduled } from './agents/schedule'
 import { tidyQuestions } from './agents/questions'
 import { maybeSendMorning } from './agents/notify'
 import { runImportJobs } from './agents/imports'
+import { readTaskFiles } from './agents/documents'
 import { learnFromNotes, weeklyCheck, weeklyCheckDue } from './memory/learn'
 import { keepEarlierNotes, moveChatMemory } from './memory/store'
 
@@ -26,6 +27,8 @@ export async function tick(now: Date = new Date()) {
   // Imports cut off mid-read (or queued when the run after the request did not start) finish here.
   const started = Date.now()
   await safe('imports', async () => (await runImportJobs({ limit: 1 })).finished)
+  // Documents attached to tasks whose read after the upload was cut short; one per tick, while there is time.
+  if (Date.now() - started < 30_000) await safe('documents', () => readTaskFiles({ limit: 1 }))
   // What Tom wrote since the last tick is learned from; on Sunday evening the weekly check runs, when there is time for it.
   await safe('memory_earlier', () => keepEarlierNotes())
   await safe('memory_moved', () => moveChatMemory())

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, Task, AgentEvent, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime } from '@/lib/client/todo'
 import { ActionItem, QuestionItem, StatusPill } from './Cards'
 import { useShell } from '@/components/Shell'
+import { Documents } from './Documents'
 
 export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const [task, setTask] = useState<Task | null>(null)
@@ -33,7 +34,7 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
   }, [onClose])
 
   useEffect(() => {
-    if (!task || !['queued', 'processing'].includes(task.status)) return
+    if (!task || (!['queued', 'processing'].includes(task.status) && !task.files?.some((f) => f.status === 'reading'))) return
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
   }, [task, load])
@@ -133,6 +134,8 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
               </div>
             )}
 
+            <Documents taskId={task.id} files={task.files || []} onChanged={refresh} />
+
             {open.length > 0 && (<>
               <h3>Questions for you</h3>
               {open.map((q) => <QuestionItem key={q.id} q={q} onDone={refresh} showTask={false} />)}
@@ -190,6 +193,8 @@ function EventRow({ e }: { e: AgentEvent }) {
   else if (e.kind === 'question_update') text = c.text
   else if (e.kind === 'feedback') text = c.text
   else if (e.kind === 'error') text = c.error
+  else if (e.kind === 'documents') text = c.attached ? `Attached ${c.attached.join(', ')}${c.check_against ? `, to check against ${c.check_against}` : ''}`
+    : c.read ? `Read and assessed ${c.read}${c.overall ? `: ${c.overall}` : ''}` : c.removed ? `Removed ${c.removed}` : `Could not read ${c.could_not_read}: ${c.error}`
   else if (e.kind === 'lookup') text = c.error ? `Could not look anything up: ${c.error}` : `Looked up ${(c.calls || []).map((x: any) => `${x.call}${x.error ? ' (failed)' : ''}${x.why ? `: ${x.why}` : ''}`).join('; ')}`
   else if (e.kind === 'status') text = `${c.status === 'queued' ? 'Queued' : `Now ${c.status}`}${c.reason ? `: ${c.reason}` : ''}${c.action ? `, ${c.action}` : ''}`
   return (

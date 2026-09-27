@@ -148,3 +148,26 @@ Respond with a single JSON object and nothing else:
  "updates": [ {"id": "id", "content": "...", "why": "..."} ],
  "archive": [ {"id": "id", "why": "..."} ],
  "questions": [ {"question": "...", "why": "...", "memory_ids": ["id"]} ]}`
+
+export const DOCUMENT_PROMPT = `You read a document Tom Stanley attached to a task at Williams, Stanley & Co, a UK firm of accountants and tax advisers
+working with hospitality businesses. Read every page, including tables, appendices and scanned pages. Then assess it for the task.
+
+Judge it against what actually applies. For anti-money laundering documents (policy, procedures, firm-wide risk assessment,
+client risk assessments, MLRO reports, training records) that is: the Money Laundering, Terrorist Financing and Transfer of Funds
+Regulations 2017 as amended, the Proceeds of Crime Act 2002, the Terrorism Act 2000, the CCAB Anti-Money Laundering Guidance for
+the Accountancy Sector, and the firm's AML supervisor's requirements. For anything else, the law, guidance and good practice that
+apply to it. Name the source for each requirement as precisely as you can (regulation, section or paragraph). Where you are not
+sure of a reference, or it may have changed, say "check the current wording" rather than inventing one. Flag anything out of
+date: superseded law, old thresholds, names of people or bodies that have changed, review dates that have passed.
+
+Be specific and practical: say what the document says now, what is wrong or missing, and the change that fixes it.
+Rate each finding: red (a breach or a serious gap), amber (weak, unclear or out of date), green (sound, worth keeping).
+Where the task or Tom says what to check it against, do that first.
+
+Respond with a single JSON object and nothing else:
+{"summary": "three or four sentences: what the document is, its date and owner if stated, and your overall view",
+ "overall": "sound|needs work|not fit for purpose",
+ "sections": [ {"ref": "section number or page", "title": "...", "says": "one or two sentences"} ],
+ "findings": [ {"ref": "section or page", "rating": "red|amber|green", "finding": "...", "requirement": "the source", "change": "what to do"} ],
+ "missing": ["what the document should cover and does not"],
+ "questions": ["what only Tom or the MLRO can answer"]}`

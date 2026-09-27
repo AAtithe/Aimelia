@@ -96,6 +96,25 @@ model again only for the six most recent messages; older ones are named as no lo
 Conversations are kept (`chats`, `chat_messages`), the last 20 messages go to the model,
 Tom's message and files are saved before the model is called so a failure loses nothing, and conversations can be deleted.
 
+## Documents on a task
+
+`src/lib/agents/documents.ts`, the Documents section of a task, and the One task form. Attach policies, procedures, risk
+assessments, letters, contracts or photos of paperwork (PDF, Word, text, PNG/JPEG/GIF/WebP; up to 3 MB each, ten per task),
+with an optional note of what to check them against.
+
+- Claude reads each document once, every page, and assesses it for the task: a summary and overall view (sound, needs work,
+  not fit for purpose), what each section says, findings rated red, amber or green with the requirement each is judged
+  against and the change that fixes it, what is missing, and questions. For AML documents it judges against MLR 2017 as
+  amended, POCA 2002, the Terrorism Act 2000, the CCAB guidance and the supervisor's requirements, names sources as
+  precisely as it can, says "check the current wording" where unsure, and flags what is out of date.
+- The task waits while its documents are read, then goes to the agent team with the assessments (and the full text of Word
+  and text documents). The team works them through: the assessment as a document, the changes as a checklist in order of
+  risk, and handovers where someone else must act. One read per document keeps the cost down.
+- PDFs and photos need the Claude key; Word and text documents work with any AI. A read that fails is tried once more by a
+  later run, then the team is told it could not be read.
+- Optionally kept in the knowledge base (as `policy`), so Ask Aimelia and the email features can draw on it; removing the
+  document removes it there too. The original can be opened from the task at any time.
+
 ## Importing tasks
 
 Import tasks (`/import`, `src/lib/agents/imports.ts`, `src/lib/agents/importText.ts`) brings work in from elsewhere.
