@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dispatcher, setLaterHook } from '@/lib/router'
 import { chatEndpoints } from '@/lib/chat/api'
 import { MAX_STEPS } from '@/lib/chat/agent'
@@ -108,5 +108,118 @@ describe('Ask Aimelia', () => {
   it('works with no AI key, on the placeholder', async () => {
     const r = await req('POST', '/chats', { message: 'Hi' })
     expect(r.data.messages[1].content).toContain('no AI key')
+  })
+})
+
+describe('Ask Aimelia with files', () => {
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+  const PDF = Buffer.from('%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF').toString('base64')
+  const b64 = (s: string) => Buffer.from(s).toString('base64')
+
+  it('shows a photo to the model, stores it, and serves it back', async () => {
+    const calls = script({ reply: 'A receipt for £42.50 from Booker.' })
+    const r = await req('POST', '/chats', { message: 'What is this?', files: [{ name: 'receipt.png', data: PNG }] })
+    expect(r.status).toBe(201)
+    const last = calls[0].messages.at(-1)!
+    expect(last.files).toEqual([{ kind: 'image', media_type: 'image/png', data: PNG, name: 'receipt.png' }])
+    expect(last.content).toContain('[Attached: receipt.png]')
+    const f = r.data.messages[0].files[0]
+    expect(f).toMatchObject({ name: 'receipt.png', kind: 'image', media_type: 'image/png', size: 68 })
+    expect(f.data).toBeUndefined() // the bytes are never in the JSON
+    const got = await call(api as any, { path: `/api/chat/files/${f.id}` })
+    expect(got.status).toBe(200)
+    expect(got.headers.get('content-type')).toBe('image/png')
+    expect(got.headers.get('x-content-type-options')).toBe('nosniff')
+    expect((await req('GET', `/chats/${r.data.chat.id}`)).data.messages[0].files).toHaveLength(1)
+  })
+
+  it('takes a file with no message, and names the conversation after it', async () => {
+    const calls = script({ reply: 'An HMRC letter.' })
+    const r = await req('POST', '/chats', { files: [{ name: 'hmrc.pdf', data: PDF }] })
+    expect(r.data.chat.title).toBe('Sent hmrc.pdf')
+    expect(calls[0].messages.at(-1)!.files![0]).toMatchObject({ kind: 'pdf', media_type: 'application/pdf' })
+    expect(calls[0].messages.at(-1)!.content).toContain('No message')
+  })
+
+  it('reads documents as text inside the message', async () => {
+    const calls = script({ reply: 'Two actions.' })
+    await req('POST', '/chats', { message: 'Actions?', files: [{ name: 'minutes.txt', data: b64('- Mandy to chase Corrigans\n- Tom to sign VAT') }] })
+    const last = calls[0].messages.at(-1)!
+    expect(last.files).toBeUndefined()
+    expect(last.content).toContain('[Attached document: minutes.txt]')
+    expect(last.content).toContain('Mandy to chase Corrigans')
+  })
+
+  it('refuses what it cannot read, before storing anything', async () => {
+    script({ reply: 'x' })
+    const bad = [
+      [{ name: 'fake.png', data: b64('not really a picture') }, 'not a photo'],
+      [{ name: 'fake.pdf', data: b64('hello') }, 'not a PDF'],
+      [{ name: 'photo.heic', data: b64('ftypheic....') }, 'HEIC'],
+      [{ name: 'tool.exe', data: b64('MZ....') }, 'cannot read'],
+    ] as const
+    for (const [file, says] of bad) {
+      const r = await req('POST', '/chats', { message: 'look', files: [file] })
+      expect(r.status, file.name).toBe(422)
+      expect(r.data.detail).toContain(says)
+    }
+    expect((await req('POST', '/chats', { message: '' })).status).toBe(422)
+    expect((await req('POST', '/chats', { message: 'x', files: Array(6).fill({ name: 'a.png', data: PNG }) })).status).toBe(422)
+    expect((await req('POST', '/chats', { message: 'x', files: [{ name: 'big.png', data: 'A'.repeat(4_300_000) }] })).status).toBe(422)
+    expect(await q(`SELECT * FROM chats`)).toEqual([])
+    expect(await q(`SELECT * FROM chat_files`)).toEqual([])
+  })
+
+  it('stops re-sending old photos once they are out of view', async () => {
+    script({ reply: 'Seen.' })
+    const first = await req('POST', '/chats', { message: 'Photo', files: [{ name: 'board.png', data: PNG }] })
+    const id = first.data.chat.id
+    for (const m of ['one', 'two']) await req('POST', '/chats', { message: m, chat_id: id })
+    let calls = script({ reply: 'ok' })
+    await req('POST', '/chats', { message: 'three', chat_id: id }) // 7 messages now: the photo's is the oldest, outside the last 6
+    expect(calls[0].messages.some((m) => m.files?.length)).toBe(false)
+    expect(calls[0].messages[0].content).toContain('board.png earlier; it is no longer in view')
+    calls = script({ reply: 'ok' })
+    await req('POST', '/chats', { message: 'again', chat_id: id, files: [{ name: 'board.png', data: PNG }] })
+    expect(calls[0].messages.at(-1)!.files).toHaveLength(1)
+  })
+
+  it('files text in the knowledge base when asked', async () => {
+    script({ tool_calls: [{ tool: 'add_to_knowledge', args: { title: 'Tronc policy 2026', text: 'Tips are shared by points.', kind: 'policy' } }] }, { reply: 'Filed.' })
+    const r = await req('POST', '/chats', { message: 'File this as our tronc policy', files: [{ name: 'tronc.txt', data: b64('Tips are shared by points.') }] })
+    expect(r.data.messages[1].steps[0]).toMatchObject({ tool: 'add_to_knowledge', ok: true })
+    expect(await one(`SELECT source, title, chunk FROM kb_chunks`)).toEqual({ source: 'policy', title: 'Tronc policy 2026', chunk: 'Tips are shared by points.' })
+  })
+
+  it('says which files arrived when there is no AI key', async () => {
+    const r = await req('POST', '/chats', { files: [{ name: 'receipt.png', data: PNG }] })
+    expect(r.data.messages[1].content).toContain('receipt.png')
+  })
+
+  it('sends photos and PDFs to Claude as image and document blocks, and photos to OpenAI as images', async () => {
+    setModelTransport(null)
+    const bodies: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: any, init: any) => {
+      bodies.push(JSON.parse(init.body))
+      const openai = String(_url).includes('openai')
+      return new Response(JSON.stringify(openai
+        ? { id: 'x', object: 'chat.completion', created: 0, model: 'gpt-4o', choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{"reply":"ok"}' } }] }
+        : { id: 'x', type: 'message', role: 'assistant', model: 'claude-sonnet-5', stop_reason: 'end_turn', content: [{ type: 'text', text: '{"reply":"ok"}' }], usage: { input_tokens: 1, output_tokens: 1 } }),
+      { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    await req('POST', '/chats', { message: 'Read these', files: [{ name: 'r.png', data: PNG }, { name: 'l.pdf', data: PDF }] })
+    const content = bodies[0].messages.at(-1).content
+    expect(content.map((c: any) => c.type)).toEqual(['image', 'document', 'text'])
+    expect(content[0].source).toEqual({ type: 'base64', media_type: 'image/png', data: PNG })
+    delete process.env.ANTHROPIC_API_KEY
+    process.env.OPENAI_API_KEY = 'sk-test'
+    await req('POST', '/chats', { message: 'And this', files: [{ name: 'r.png', data: PNG }] })
+    const oa = bodies.at(-1).messages.at(-1).content
+    expect(oa[0]).toEqual({ type: 'image_url', image_url: { url: `data:image/png;base64,${PNG}` } })
+    // OpenAI cannot read PDFs: said plainly, and the message is kept.
+    const r = await req('POST', '/chats', { message: 'And this', files: [{ name: 'l.pdf', data: PDF }] })
+    expect(r.status).toBe(502)
+    expect(r.data.detail).toContain('Claude')
   })
 })

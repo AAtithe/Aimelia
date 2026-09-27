@@ -272,4 +272,16 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
   )`,
   `CREATE INDEX IF NOT EXISTS chat_messages_chat_idx ON chat_messages (chat_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS chat_files (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id uuid NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    kind text NOT NULL,
+    media_type text NOT NULL,
+    size int NOT NULL DEFAULT 0,
+    data text,
+    text text,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  )`,
+  `CREATE INDEX IF NOT EXISTS chat_files_message_idx ON chat_files (message_id)`,
 ]
