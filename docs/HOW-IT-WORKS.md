@@ -104,6 +104,8 @@ instead. Files are limited to 3 MB, Vercel's request limit after encoding.
   what is out of date, archives what is finished, and asks Tom up to five questions. Its summary is shown on the page.
 - **Everything is visible and reversible.** The page shows the questions, the check, every memory with where it came from
   and its history, every note, and a log of every change (`memory_log`) by Tom, by a note or by the check.
+- On the first run, what Tom wrote before memory existed (answered questions, feedback, send-back reasons, task briefs,
+  Ask Aimelia messages) is brought in once, with its original date, and learned from ten notes per timer run.
 - A note the AI fails to read is kept and tried again by later runs, three times. Without an AI key, notes are kept but
   nothing is drawn from them.
 

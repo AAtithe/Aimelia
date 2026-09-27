@@ -67,6 +67,20 @@ describe('everything Tom writes is kept', () => {
     expect(sources).toEqual(['brain_dump', 'chat', 'feedback', 'task_brief'])
   })
 
+  it('what Tom wrote before memory existed is brought in once, with its original date', async () => {
+    const t = (await one(`INSERT INTO tasks (title, notes) VALUES ('Old Bentleys task', 'They want monthly packs by day 5') RETURNING id`))!
+    await q(`INSERT INTO questions (task_id, question, answer, status, answered_at) VALUES ($1, 'Who signs off?', 'Sam Patel, the FD', 'answered', '2026-08-01T09:00:00Z'),
+      ($1, 'Unanswered?', NULL, 'open', NULL)`, [t.id])
+    await q(`INSERT INTO lessons (source, task_title, note) VALUES ('feedback', 'Old Bentleys task', 'Never copy the client on internal notes'), ('edit', 'x', '')`)
+    await q(`INSERT INTO tasks (title, notes, source) VALUES ('Imported one', 'from a document', 'document')`)
+    const { keepEarlierNotes } = await import('@/lib/memory/store')
+    expect(await keepEarlierNotes()).toBe(3)
+    expect(await keepEarlierNotes()).toBeNull() // once only
+    const notes = (await req('GET', '/memory/notes')).data.notes
+    expect(notes.map((n: any) => n.source).sort()).toEqual(['answer', 'feedback', 'task_brief'])
+    expect(notes.find((n: any) => n.source === 'answer').created_at).toBe('2026-08-01T09:00:00.000Z')
+  })
+
   it('Tom can delete a note', async () => {
     const { qn } = await askedTask()
     await req('POST', `/questions/${qn.id}/answer`, { answer: 'Sam Patel signs them off.' })

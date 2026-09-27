@@ -4,6 +4,7 @@ import { createDueRoutines, nudgeStale, wakeScheduled } from './agents/schedule'
 import { maybeSendMorning } from './agents/notify'
 import { runImportJobs } from './agents/imports'
 import { learnFromNotes, weeklyCheck, weeklyCheckDue } from './memory/learn'
+import { keepEarlierNotes } from './memory/store'
 
 type Step = [name: string, run: () => Promise<unknown>]
 let extraSteps: Step[] = []
@@ -25,6 +26,7 @@ export async function tick(now: Date = new Date()) {
   const started = Date.now()
   await safe('imports', async () => (await runImportJobs({ limit: 1 })).finished)
   // What Tom wrote since the last tick is learned from; on Sunday evening the weekly check runs, when there is time for it.
+  await safe('memory_earlier', () => keepEarlierNotes())
   await safe('memory_notes', () => learnFromNotes({ startWithinMs: 20_000, limit: 10 }))
   if (Date.now() - started < 40_000 && (await weeklyCheckDue(now))) await safe('memory_check', async () => (await weeklyCheck('weekly', now))?.status)
   const pipeline = await getPipeline()

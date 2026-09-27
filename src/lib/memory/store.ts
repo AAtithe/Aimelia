@@ -152,3 +152,27 @@ export async function memoryForContext(text: string, limit = 20) {
 
 export const MEMORY_GUIDANCE = 'Facts Tom has told Aimelia before. Use them rather than asking him again. from_tom means he wrote or checked it himself. '
   + 'If the task, or anything you are told, contradicts one of them, say so in your summary and ask Tom which is right.'
+
+/**
+ * Once, on the first run after memory was added: bring in what Tom wrote before it existed, with its original date.
+ * Answered questions, feedback and send-back reasons, task briefs he wrote, and his Ask Aimelia messages.
+ * The same refs as live capture, so nothing is kept twice. Returns how many notes were added, or null if done before.
+ */
+export async function keepEarlierNotes(): Promise<number | null> {
+  const first = await one(`INSERT INTO app_config (key, value) VALUES ('memory_backfilled', now()::text) ON CONFLICT (key) DO NOTHING RETURNING key`)
+  if (!first) return null
+  const added = await q(`INSERT INTO memory_notes (source, ref, text, context, created_at)
+      SELECT 'answer', 'question:' || qn.id, qn.answer, jsonb_build_object('question', qn.question, 'task', t.title), COALESCE(qn.answered_at, qn.created_at)
+        FROM questions qn JOIN tasks t ON t.id = qn.task_id WHERE qn.status = 'answered' AND coalesce(qn.answer, '') <> ''
+      UNION ALL
+      SELECT CASE WHEN l.source = 'feedback' THEN 'feedback' ELSE 'send_back' END, 'lesson:' || l.id, l.note, jsonb_build_object('task', l.task_title), l.created_at
+        FROM lessons l WHERE l.source IN ('feedback', 'rejection') AND l.note <> ''
+      UNION ALL
+      SELECT 'task_brief', 'task:' || t.id, t.title || E'\n\n' || t.notes, jsonb_build_object('task', t.title), t.created_at
+        FROM tasks t WHERE t.kind = 'task' AND t.source IS NULL AND t.notes <> ''
+      UNION ALL
+      SELECT 'chat', 'chat:' || m.id, m.content, jsonb_build_object('conversation', c.title), m.created_at
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id WHERE m.role = 'user' AND length(trim(m.content)) >= 20
+    ON CONFLICT (source, ref) DO NOTHING RETURNING id`)
+  return added.length
+}
