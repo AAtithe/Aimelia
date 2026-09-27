@@ -253,8 +253,8 @@ describe('Ask Aimelia, the full agent', () => {
     expect(calls[0]).toMatchObject({ provider: 'anthropic', model: CHAT_MODEL, effort: 'high', fallback: true })
     expect(calls[0]).toMatchObject({ retries: 1 })
     expect(calls[0].timeoutMs).toBeGreaterThan(130_000)
-    expect(CHAT_MODEL).toBe('claude-fable-5-1')
-    expect((await req('GET', '/chats')).data.model).toBe('claude-fable-5-1')
+    expect(CHAT_MODEL).toBe('claude-opus-5-5')
+    expect((await req('GET', '/chats')).data.model).toBe('claude-opus-5-5')
     process.env.CHAT_MODEL = 'claude-opus-5'
     await req('POST', '/chats', { message: 'Hi' })
     expect(calls.at(-1)!.model).toBe('claude-opus-5')
@@ -276,7 +276,7 @@ describe('Ask Aimelia, the full agent', () => {
     const r = await req('POST', '/chats', { message: 'VAT on 12,500, and the registration threshold?' })
     expect(r.data.messages[1].steps.map((s: any) => [s.tool, s.ok])).toEqual([['calculate', true], ['web_search', true]])
     const web = seen.find((c) => c.role === 'web')!
-    expect(web).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5', webSearch: 5 })
+    expect(web).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5', webSearch: 5 })
     const results = seen.at(-1)!.messages.at(-1)!.content
     expect(results).toContain('\\"vat\\":2500')
     expect(results).toContain('division by zero')
@@ -289,7 +289,7 @@ describe('Ask Aimelia, the full agent', () => {
     const models: string[] = []
     setModelTransport(async (c) => {
       models.push(String(c.model))
-      if (c.model === CHAT_MODEL) throw new LLMError('anthropic claude-fable-5-1: 400 {"type":"invalid_request_error","message":"data retention"}')
+      if (c.model === CHAT_MODEL) throw new LLMError('anthropic claude-opus-5-5: 404 {"type":"not_found_error","message":"model: claude-opus-5-5"}')
       return '{"reply":"ok"}'
     })
     expect((await req('POST', '/chats', { message: 'Hi' })).data.messages[1].content).toBe('ok')
@@ -298,9 +298,26 @@ describe('Ask Aimelia, the full agent', () => {
     expect((await req('GET', '/chats')).data.model).toBe('claude-opus-5')
     // An overload is not a refusal: it is reported, not worked around.
     resetChatModel()
-    setModelTransport(async () => { throw new LLMError('anthropic claude-fable-5-1: 529 overloaded') })
+    setModelTransport(async () => { throw new LLMError('anthropic claude-opus-5-5: 529 overloaded') })
     expect((await req('POST', '/chats', { message: 'Hi' })).status).toBe(502)
     expect((await req('GET', '/chats')).data.model).toBe(CHAT_MODEL)
+  })
+
+  it('searches the web on Opus 5 too if this account cannot use Opus 5.5', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    const models: string[] = []
+    const chatReplies: unknown[] = [{ tool_calls: [{ tool: 'web_search', args: { query: 'VAT threshold?' } }] }, { reply: '90,000.' }]
+    setModelTransport(async (c) => {
+      if (c.role === 'web') {
+        models.push(String(c.model))
+        if (c.model === CHAT_MODEL) throw new LLMError('anthropic claude-opus-5-5: 403 {"type":"permission_error"}')
+        return 'The threshold is 90,000.'
+      }
+      return JSON.stringify(chatReplies.shift())
+    })
+    const r = await req('POST', '/chats', { message: 'VAT threshold?' })
+    expect(r.data.messages[1].steps[0]).toMatchObject({ tool: 'web_search', ok: true })
+    expect(models).toEqual([CHAT_MODEL, 'claude-opus-5'])
   })
 
   it('does not offer web search or the Microsoft tools when they cannot run', async () => {
@@ -427,7 +444,7 @@ describe('Claude requests for the agent', () => {
     const r = await req('POST', '/chats', { message: 'Hi' })
     expect(r.data.messages[1].content).toBe('ok')
     const b = bodies[0]
-    expect(b.body).toMatchObject({ model: 'claude-fable-5-1', output_config: { effort: 'high' }, fallbacks: 'default', stream: true, max_tokens: 16000 })
+    expect(b.body).toMatchObject({ model: 'claude-opus-5-5', output_config: { effort: 'high' }, fallbacks: 'default', stream: true, max_tokens: 16000 })
     expect(b.body.temperature).toBeUndefined()
     expect(b.body.thinking).toBeUndefined()
     expect(b.headers['anthropic-beta']).toContain('server-side-fallback-2026-07-01')
@@ -441,7 +458,7 @@ describe('Claude requests for the agent', () => {
       return claude([{ type: 'text', text: 'plain' }])
     }))
     const { complete } = await import('@/lib/llm')
-    expect(await complete({ provider: 'anthropic', model: 'claude-fable-5-1', role: 'x', system: 's', messages: [{ role: 'user', content: 'hi' }], fallback: true })).toBe('plain')
+    expect(await complete({ provider: 'anthropic', model: 'claude-opus-5-5', role: 'x', system: 's', messages: [{ role: 'user', content: 'hi' }], fallback: true })).toBe('plain')
     expect(bodies.map((b) => !!b.body.fallbacks)).toEqual([true, false])
   })
 
@@ -453,7 +470,7 @@ describe('Claude requests for the agent', () => {
       return claude([{ type: 'text', text: 'The threshold is 90,000.', citations: [{ type: 'web_search_result_location', url: 'https://www.gov.uk/vat-registration', title: 'VAT registration', cited_text: '90,000', encrypted_index: 'x' }] }])
     }))
     const { complete } = await import('@/lib/llm')
-    const out = await complete({ provider: 'anthropic', model: 'claude-opus-5', role: 'web', system: 's', messages: [{ role: 'user', content: 'threshold?' }], webSearch: 5 })
+    const out = await complete({ provider: 'anthropic', model: 'claude-opus-5-5', role: 'web', system: 's', messages: [{ role: 'user', content: 'threshold?' }], webSearch: 5 })
     expect(bodies[0].body.tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }])
     expect(bodies[1].body.messages.at(-1).role).toBe('assistant') // the paused turn sent back to continue
     expect(out).toContain('The threshold is 90,000.')
