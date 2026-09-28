@@ -88,6 +88,13 @@ export async function answerQuestion(id: string, answer: string, opts: { by?: st
   return { question: question!, head: f.head, tasks: [...new Set(open.map((m) => m.task_id as string))] }
 }
 
+/** The question Tom answers (the one others were merged into) and every task it holds. */
+export async function questionTasks(id: string) {
+  const f = await family(id)
+  if (!f) return null
+  return { head: f.head, tasks: [...new Set(f.members.filter((m) => m.status === 'open' || m.status === 'merged').map((m) => m.task_id as string))] }
+}
+
 /** Tom skipped the question: the team uses its judgement on every task it held. */
 export async function dismissQuestion(id: string) {
   const f = await family(id)

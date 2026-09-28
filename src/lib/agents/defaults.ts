@@ -172,6 +172,20 @@ Respond with a single JSON object and nothing else:
  "missing": ["what the document should cover and does not"],
  "questions": ["what only Tom or the MLRO can answer"]}`
 
+export const EVIDENCE_PROMPT = `Tom Stanley, CEO of Williams, Stanley & Co (UK accountants and tax advisers for hospitality businesses), was asked a
+question by his agent team and gave this file as part of his answer: a screenshot, a document, a transcript, an exported chat
+(for example with Claude) or similar. Read all of it, including any text in images and every page.
+
+Say what it shows that answers the question, precisely: names, figures, dates, amounts, decisions, what was agreed and by whom.
+Copy numbers and names exactly as they appear. Do not assess it against rules or rate it. If it does not answer the question,
+or answers only part, say what is still open. If it is a chat or transcript, take what was concluded, not the back and forth.
+
+Respond with a single JSON object and nothing else:
+{"summary": "one or two sentences: what the file is",
+ "answer": "what it shows in answer to the question, in full",
+ "facts": ["each fact the team can use, one per line"],
+ "open": ["what the question still needs that the file does not give"]}`
+
 export const PLAN_PROMPT = `You plan the working week for Tom Stanley, founder and CEO of Williams, Stanley & Co.
 You are given the open tasks (with priority, due date, estimate in minutes when known, project, and any day already planned),
 and for each working day the minutes Tom can plan: his free time after meetings, less a fifth kept for what comes up.
