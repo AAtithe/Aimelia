@@ -26,7 +26,7 @@ Center through a fixed list of read-only lookups.
 
 ## Today
 
-Today follows the work through: answer, approve, do, check. It has a section for each: Questions, To approve, To do,
+Today follows the work through: answer, ask, approve, do, check. It has a section for each: Questions, To ask, To approve, To do,
 Follow-ups (due now, and the checks coming up, each of which can be brought forward) and, when there are any, Failed runs.
 
 Approving decides; it does not do. An approved email, call, handover, document or checklist waits in To do with what to
@@ -93,6 +93,31 @@ is unavailable the tasks stay as typed.
   and repeats on one task are merged. A task that goes stale and back through Triage hands any group it led to the next
   task.
 
+## Tasks in stages: go and ask, report back, move on
+
+`src/lib/agents/stages.ts`, the Stages section of a task, and To ask on Today. For work that hangs on other people:
+ask Mandy whether the VAT return went in, ask Ravi what HMRC said, then reply to the client.
+
+- **A stage** is an ask (who, and what to ask them) or a do (a piece of work). They run in order; the task is on the
+  first one still open. Tom goes to each person himself, in person, on Teams or by email.
+- **Laid out by the team or by Tom.** When a task cannot be finished until someone answers, the first agent that sees it
+  lays out the stages (at most six) and drafts for the first stage only. After that the plan is Tom's: he adds, edits,
+  skips or removes stages in the task drawer, up to twelve. Stages are never laid out a second time by the agents.
+- **Each run works the current stage only.** The agents see every stage with its answer and which one they are on. For
+  an ask they draft the one message Tom sends that person; for a do, the finished work using every answer so far.
+  The Reviewer judges the draft against the current stage. Work drafted while a stage is current belongs to it.
+- **Reporting back.** To ask on Today shows the stage each task is on (Stage 2 of 3, Ask Ravi, what earlier stages
+  came back with), with a box for what they said. Recording it keeps the answer as a note in What Aimelia knows,
+  sets aside that stage's drafts not yet approved, marks its approved but unsent drafts done, closes a check waiting
+  only on its messages, and sends the task back to the team for the next stage. A do stage is marked done with an
+  optional outcome; any stage can be skipped. When no stage is left the team finishes the task with the answers.
+  Ask Aimelia can record an answer too (`record_stage_answer`).
+- **Waiting, not done.** A staged task is never closed while a stage is open: once its drafts are approved and done it
+  shows as Stage with you, and a run that drafts nothing for an open stage leaves it there rather than failing. A task
+  still waiting on Tom's own answers to the team moves on when those are in. The morning push lists who to ask.
+- API: `POST /api/todo/tasks/:id/stages` (`stages`, `run_now`), `PATCH` and `DELETE /api/todo/stages/:id`,
+  `POST /api/todo/stages/:id/answer` (`answer`), `/done` (`outcome`), `/skip`. `GET /api/todo/briefing` has `stages`.
+
 ## Ask Aimelia: the chat agent
 
 A chatbot Tom can talk to about his work, as a page (`/chat`, first in My work) and as a drawer opened by the Ask Aimelia
@@ -118,6 +143,7 @@ knows (below) the memories Tom set or checked, his standing preferences, and tho
 | create_task | Adds a task for the agent team (source `chat`), as Add task does |
 | update_task | Changes title, notes (or adds a line), priority, due date; closes a task or sends it back to the agents |
 | answer_question | Answers an open agent question, and every question merged with it; each task goes back to the team once none are left, as the button does |
+| record_stage_answer | Records what someone said on a task's ask stage (or that a stage is done, or skipped); the task moves on to its next stage |
 | calculate | Exact arithmetic (`src/lib/chat/calc.ts`, a parser, never eval): VAT, margins, labour %, variances. Every figure goes through it |
 | web_search | Claude's server-side web search, on the chat model; the answer comes back with its sources. Needs the Claude key |
 | remember, forget | Standing facts and preferences, kept across conversations |
@@ -277,7 +303,7 @@ decides:
 - A web search with a phone number in it is refused, so no number leaves for a search engine.
 - Email drafts go to email addresses only, at most 10 people. A draft to a number is refused; a draft that carries a
   number says so, and Aimelia tells Tom to check who it goes to.
-- One message can make at most 3 email drafts, 10 new tasks, 10 task changes, 10 answers, 5 knowledge base entries,
+- One message can make at most 3 email drafts, 10 new tasks, 10 task changes, 10 answers, 10 stage answers, 5 knowledge base entries,
   5 remembers or forgets, 3 meeting briefs and 2 focus bookings. Past that, Aimelia stops, says what is left, and asks
   Tom to confirm the rest in his next message. A pasted list of 50 numbers cannot turn into 50 drafts.
 - Aimelia's own learning never keeps a number: a new memory with one is dropped, and one is taken out of any update it

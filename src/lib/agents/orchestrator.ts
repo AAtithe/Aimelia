@@ -10,6 +10,8 @@
  *     feedback, up to max_revisions times.
  *  4. The final draft is saved as proposed actions; the task becomes ready. If the reviewers
  *     never approved, the actions are still saved but flagged.
+ *  5. A task that hangs on other people's answers runs in stages (stages.ts): a worker may lay them out
+ *     the first time, and each run works only the current stage.
  */
 import { json, one, q, type Row } from '../db'
 import { completeJson, LLMError } from '../llm'
@@ -25,6 +27,7 @@ import { gatherFacts } from './sources'
 import { BLOCKING, recordQuestions } from './questions'
 import { markUrgent } from './triage'
 import { URGENT_WORDS, urgencySql } from './urgency'
+import { addStages, cleanStages, currentStage, stagesForContext, tagForStage } from './stages'
 
 const FOLLOW_UP_INSTRUCTIONS = {
   delegate: 'The work was delegated and has not come back. Draft a short, firm chaser to the owner (kind delegate, same owner, a new due date) and say what Tom should check.',
@@ -139,6 +142,7 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
     what_aimelia_knows: await memoryForContext(`${task.title} ${task.notes || ''}`),
     how_to_use_what_aimelia_knows: MEMORY_GUIDANCE,
     ...((await documentsForContext(task.id)) ?? {}),
+    ...((await stagesForContext(task.id)) ?? {}),
     ...(facts ? { facts_from_ws_systems: facts } : {}),
     ...(followUp ? {
       this_is_a_follow_up: {
@@ -183,6 +187,12 @@ export async function runTask(taskId: string): Promise<string> {
       if (reply.summary) await q(`UPDATE tasks SET summary = $2 WHERE id = $1`, [taskId, String(reply.summary)])
       if (reply.urgent && typeof reply.urgent === 'object' && reply.urgent.vital === true) {
         await markUrgent(taskId, true, String(reply.urgent.reason || ''), agent.name)
+      }
+      // A plan in stages is laid out once, by the first agent to give one; after that Tom owns it.
+      const stages = cleanStages(reply.stages)
+      if (stages.length && !('task_stages' in context)) {
+        await addStages(taskId, stages, agent.name)
+        Object.assign(context, await stagesForContext(taskId))
       }
       await logEvent(taskId, 'worker', agent.name, { summary: reply.summary ?? null, actions, seconds: Math.round((Date.now() - started) / 100) / 10 }, attempt)
       const asked = agent.can_ask_questions ? cleanQuestions(reply.questions) : []
@@ -237,6 +247,8 @@ async function pauseForInput(taskId: string, askedBy: string, asked: AskedQuesti
 
 async function saveActions(taskId: string, draft: Draft[], approved: boolean,
   review: { score: number | null; notes: string; actionFeedback: any[] }, maxRevisions: number): Promise<string> {
+  const stage = await currentStage(taskId)
+  draft = tagForStage(draft, stage)
   await q(`UPDATE actions SET status = 'superseded' WHERE task_id = $1 AND status = 'proposed'`, [taskId])
   const start = ((await one<{ n: number }>(`SELECT COALESCE(MAX(position), -1)::int AS n FROM actions WHERE task_id = $1`, [taskId]))!.n) + 1
   const notesByIndex = new Map<number, string[]>()
@@ -251,10 +263,12 @@ async function saveActions(taskId: string, draft: Draft[], approved: boolean,
       [taskId, start + i, item.kind, item.title, item.content, json(item.details), approved ? 'approved' : 'flagged', review.score, notes],
     )
   }
-  const flag = approved ? null : `Reviewer did not approve after ${maxRevisions + 1} attempts. Check before using. ${review.notes}`.trim()
-  const status = draft.length ? 'ready' : 'failed'
+  const flag = approved || !draft.length ? null : `Reviewer did not approve after ${maxRevisions + 1} attempts. Check before using. ${review.notes}`.trim()
+  // Nothing drafted is fine while a stage is open (Tom goes and asks) or approved work is still to do.
+  const status = draft.length ? 'ready' : stage ? 'waiting'
+    : (await one(`SELECT 1 FROM actions WHERE task_id = $1 AND status = 'approved' LIMIT 1`, [taskId])) ? 'doing' : 'failed'
   await q(`UPDATE tasks SET status = $2, review_flag = $3 WHERE id = $1`, [taskId, status, flag])
-  if (!draft.length) await logEvent(taskId, 'error', 'orchestrator', { error: 'The agents produced no actions.' })
+  if (status === 'failed') await logEvent(taskId, 'error', 'orchestrator', { error: 'The agents produced no actions.' })
   await logEvent(taskId, 'status', 'orchestrator', { status, approved, actions: draft.length })
   return status
 }

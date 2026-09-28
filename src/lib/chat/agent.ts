@@ -33,7 +33,8 @@ import { addressOf, getMessage, type GraphMessage } from '../email/mail'
 import { createDraft, createReplyDraft } from '../email/drafting'
 import { connection, graph } from '../microsoft'
 import { bookFocus } from '../agents/calendarBlocks'
-import { settle } from '../agents/api'
+import { finishStage, settle } from '../agents/api'
+import { briefingStages, stagesOf } from '../agents/stages'
 import { answerQuestion } from '../agents/questions'
 import { getPipeline, logEvent, processQueue, seedDefaults } from '../agents/orchestrator'
 import { touch } from '../agents/schedule'
@@ -76,7 +77,7 @@ const taskLine = (t: any) => ({ id: t.id, title: t.title, status: t.status, prio
 
 export const TOOLS: Record<string, Tool> = {
   briefing: {
-    about: 'What is waiting on Tom now: task counts by status, open questions from the agents, drafts ready to approve, follow-ups due',
+    about: 'What is waiting on Tom now: task counts by status, open questions from the agents, drafts ready to approve, follow-ups due, and the stages he has to go and ask someone about',
     args: '{}',
     run: async () => {
       const [counts, questions, actions, due] = await Promise.all([
@@ -87,11 +88,14 @@ export const TOOLS: Record<string, Tool> = {
            WHERE a.status = 'proposed' AND t.status = 'ready' ORDER BY t.priority, t.created_at, a.position LIMIT 10`),
         q(`SELECT ${TASK_COLS} FROM tasks WHERE status = 'due' ORDER BY due_date LIMIT 10`),
       ])
-      return { counts: Object.fromEntries(counts.map((c) => [c.status, c.n])), open_questions: questions, drafts_to_approve: actions, follow_ups_due: due.map(taskLine) }
+      const stages = (await briefingStages('t.priority')).slice(0, 10).map((s) => ({ stage_id: s.id, task: s.task_title, task_id: s.task_id,
+        stage: `${s.stage_number} of ${s.stage_count}`, kind: s.kind, ...(s.kind === 'ask' ? { ask: s.who } : {}), what: s.title }))
+      return { counts: Object.fromEntries(counts.map((c) => [c.status, c.n])), open_questions: questions, drafts_to_approve: actions, follow_ups_due: due.map(taskLine),
+        stages_waiting_on_tom: stages }
     },
   },
   search_tasks: {
-    about: 'Find tasks by words in the title or notes, and/or by status (queued, processing, needs_input, ready, done, failed, scheduled, due)',
+    about: 'Find tasks by words in the title or notes, and/or by status (queued, processing, needs_input, ready, doing, waiting (on a stage: someone to ask), done, failed, scheduled, due)',
     args: '{"query": "optional words", "status": "optional status", "include_done": false}',
     run: async (a) => {
       const words = String(a.query || '').trim()
@@ -108,11 +112,13 @@ export const TOOLS: Record<string, Tool> = {
     run: async (a) => {
       const t = await one(`SELECT * FROM tasks WHERE id::text = $1`, [String(a.id || '')])
       if (!t) return 'No task with that id.'
-      const [questions, actions] = await Promise.all([
+      const [questions, actions, stages] = await Promise.all([
         q(`SELECT id, question, why, answer, status, asked_by FROM questions WHERE task_id = $1 ORDER BY created_at`, [t.id]),
         q(`SELECT kind, title, content, status FROM actions WHERE task_id = $1 AND status <> 'superseded' ORDER BY position`, [t.id]),
+        stagesOf(t.id),
       ])
-      return { ...taskLine(t), notes: clip(t.notes, 1500), questions, actions: actions.map((x) => ({ ...x, content: clip(x.content, 1200) })) }
+      return { ...taskLine(t), notes: clip(t.notes, 1500), questions, actions: actions.map((x) => ({ ...x, content: clip(x.content, 1200) })),
+        ...(stages.length ? { stages: stages.map((s) => ({ stage_id: s.id, kind: s.kind, ...(s.kind === 'ask' ? { ask: s.who } : {}), what: s.title, status: s.status, answer: s.answer })) } : {}) }
     },
   },
   create_task: {
@@ -143,6 +149,21 @@ export const TOOLS: Record<string, Tool> = {
       await keepNote('answer', answer, { question: r.head.question, via: 'chat' }, `question:${r.head.id}`)
       const resumed = await settle(r.tasks, 'questions answered')
       return { answered: true, task_back_with_agents: resumed.includes(qn.task_id), tasks_it_settled: r.tasks.length }
+    },
+  },
+  record_stage_answer: {
+    about: 'Report back on a stage of a task: what the person said when Tom asked them (an ask stage), or that a do stage is done. The task then moves on to its next stage with the agents. Only when Tom gives the answer or says it is done',
+    args: '{"stage_id": "id from briefing or get_task", "answer": "what they said, in Tom\'s words (or the outcome of a do stage)", "skip": false}',
+    run: async (a) => {
+      const answer = String(a.answer || '').trim()
+      if (!a.skip && !answer) return 'Not recorded: the answer is empty.'
+      try {
+        const r = await finishStage(String(a.stage_id || ''), a.skip ? 'skipped' : 'answered', a.skip ? '' : answer, 'chat')
+        return { recorded: true, next_stage: r.next ? (r.next.kind === 'ask' ? `Ask ${r.next.who}: ${r.next.title}` : r.next.title) : 'none: the team finishes the task',
+          task_back_with_agents: r.resumed }
+      } catch (e) {
+        return `Not recorded: ${(e as Error).message}`
+      }
     },
   },
   search_memory: {
@@ -403,7 +424,7 @@ How to work:
 - Use the tools for any fact about Tom's tasks, email, diary, knowledge base or clients. Never guess or invent one.
 - Put every sum through calculate and quote its results; never do arithmetic in your head.
 ${has('web_search') ? '- For outside facts that change (HMRC rates and thresholds, deadlines, legislation, news), use web_search and name the source.\n' : ''}- If a tool says something is unavailable or not connected, say so plainly rather than working around it.
-- Tools that change things (create_task, update_task, answer_question, add_to_knowledge, remember, forget, save_for_later${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
+- Tools that change things (create_task, update_task, answer_question, record_stage_answer, add_to_knowledge, remember, forget, save_for_later${has('draft_email') ? ', draft_email, book_focus_time, meeting_brief' : ''})
   run only when Tom asks for that outcome. Then do it without asking again, and confirm exactly what you did.
 - When Tom tells you something lasting about himself, the firm, clients or how he wants things done, offer to remember it, or remember it if he says so.
 - Before answering about a client, a person, a date or how Tom likes something done, check search_memory as well as what you remember below.

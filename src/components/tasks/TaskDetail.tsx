@@ -5,6 +5,7 @@ import { api, Task, AgentEvent, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime }
 import { ActionItem, QuestionItem, StatusPill } from './Cards'
 import { useShell } from '@/components/Shell'
 import { Documents } from './Documents'
+import { Stages } from './Stages'
 
 export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const [task, setTask] = useState<Task | null>(null)
@@ -151,6 +152,8 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
 
             <Documents taskId={task.id} files={task.files || []} onChanged={refresh} />
 
+            <Stages task={task} onChanged={refresh} />
+
             {open.length > 0 && (<>
               <h3>Questions for you</h3>
               {open.map((q) => <QuestionItem key={q.id} q={q} onDone={refresh} showTask={false} />)}
@@ -206,6 +209,8 @@ function EventRow({ e }: { e: AgentEvent }) {
   else if (e.kind === 'question') text = `Asked you: ${(c.questions || []).map((q: any) => q.question).join(' | ')}`
   else if (e.kind === 'answer') text = e.actor === 'aimelia' ? `Answered "${c.question}" from what you said before${c.source ? ` (${c.source})` : ''}: ${c.answer}` : `You answered "${c.question}": ${c.answer}${c.shared_with ? ` (also settled ${c.shared_with} shared question${c.shared_with === 1 ? '' : 's'})` : ''}`
   else if (e.kind === 'question_update') text = c.text
+  else if (e.kind === 'stages') text = c.added ? `Laid out ${c.added.length} stage${c.added.length === 1 ? '' : 's'}: ${c.added.join('; ')}` : `Removed the stage ${c.removed}`
+  else if (e.kind === 'stage') text = c.outcome === 'skipped' ? `Skipped the stage ${c.stage}` : c.kind === 'ask' ? `${c.who} answered "${c.stage.replace(/^Ask [^:]*: /, '')}": ${c.answer}` : `Stage done: ${c.stage}${c.answer ? `. ${c.answer}` : ''}`
   else if (e.kind === 'feedback') text = c.text
   else if (e.kind === 'error') text = c.error
   else if (e.kind === 'documents') text = c.attached ? `Attached ${c.attached.join(', ')}${c.check_against ? `, to check against ${c.check_against}` : ''}`

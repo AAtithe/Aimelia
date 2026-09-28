@@ -26,6 +26,7 @@ import { urgencyOf, urgencySql } from './urgency'
 import { memoryEndpoints } from '../memory/api'
 import { plannerEndpoints } from '../planner/api'
 import { dueBack } from '../planner/projects'
+import { addStages, briefingStageOut, briefingStages, hasOpenStage, MAX_STAGES, settleStage, stageLine, stageOut, stagesOf } from './stages'
 
 // ---------------------------------------------------------------- schemas
 
@@ -75,6 +76,12 @@ const RoutineIn = z.object({ title: z.string().trim().min(1).max(500), notes: z.
   lead_days: z.number().int().min(0).max(30).default(3), enabled: z.boolean().default(true), next_due: ymd.nullable().optional() })
 const RoutinePatch = RoutineIn.partial()
 const LessonPatch = z.object({ active: z.boolean() })
+const StageIn = z.object({ kind: z.enum(['ask', 'do']).default('ask'), who: z.string().trim().max(120).default(''), title: z.string().trim().min(1).max(500),
+  details: z.string().max(2000).default('') }).refine((x) => x.kind === 'do' || !!x.who, { message: 'Say who to ask.', path: ['who'] })
+const StagesIn = z.object({ stages: z.array(StageIn).min(1).max(MAX_STAGES), run_now: z.boolean().default(false) })
+const StagePatch = z.object({ who: z.string().trim().max(120).optional(), title: z.string().trim().min(1).max(500).optional(), details: z.string().max(2000).optional() })
+const StageAnswer = z.object({ answer: z.string().trim().min(1).max(5000) })
+const StageDone = z.object({ outcome: z.string().trim().max(5000).default('') })
 
 // ---------------------------------------------------------------- serialisers
 
@@ -123,8 +130,8 @@ const lessonOut = (l: Row) => ({ id: l.id, source: l.source, action_kind: l.acti
 
 /** Which statuses each view on the task list covers. */
 export const TASK_VIEWS: Record<string, string[] | null> = {
-  open: ['queued', 'processing', 'needs_input', 'ready', 'doing', 'failed', 'scheduled', 'due'],
-  waiting: ['needs_input', 'ready', 'doing', 'due', 'failed'], // waiting on Tom
+  open: ['queued', 'processing', 'needs_input', 'ready', 'doing', 'waiting', 'failed', 'scheduled', 'due'],
+  waiting: ['needs_input', 'ready', 'doing', 'waiting', 'due', 'failed'], // waiting on Tom
   team: ['queued', 'processing'], // with the agents
   parked: ['scheduled'],
   done: ['done'],
@@ -194,7 +201,9 @@ export async function fullTask(id: string) {
     q(`SELECT * FROM events WHERE task_id = $1 ORDER BY created_at`, [id]),
   ])
   const files = await q(`SELECT ${FILE_COLS} FROM task_files WHERE task_id = $1 ORDER BY created_at`, [id])
-  return { ...taskOut(t), questions: questions.map(questionOut), actions: actions.map(actionOut), events: events.map(eventOut), files: files.map(fileOut) }
+  const stages = await stagesOf(id)
+  return { ...taskOut(t), questions: questions.map(questionOut), actions: actions.map(actionOut), events: events.map(eventOut), files: files.map(fileOut),
+    stages: stages.map(stageOut) }
 }
 
 const kickQueue = (limit = 5) => runLater(() => processQueue({ limit }))
@@ -246,9 +255,13 @@ function importReply(saved: Saved, runNow: boolean) {
  */
 export const TO_DO_KINDS = new Set(['email_draft', 'call', 'delegate', 'document', 'checklist'])
 
-/** Nothing left to approve: the task is with Tom to do while approved actions wait, and done when none do. */
+/**
+ * Nothing left to approve: the task is with Tom to do while approved actions wait, on its current stage while a
+ * stage is open (someone to ask), and done when neither is left.
+ */
 async function closeIfSettled(taskId: string) {
-  const r = await one(`UPDATE tasks SET status = CASE WHEN EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'approved') THEN 'doing' ELSE 'done' END
+  const r = await one(`UPDATE tasks SET status = CASE WHEN EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'approved') THEN 'doing'
+             WHEN EXISTS (SELECT 1 FROM task_stages WHERE task_id = $1 AND status = 'open') THEN 'waiting' ELSE 'done' END
            WHERE id = $1 AND status IN ('ready','doing')
            AND NOT EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'proposed') RETURNING status`, [taskId])
   if (r?.status === 'done') await logEvent(taskId, 'status', 'aimelia', { status: 'done', reason: 'every action is done' })
@@ -302,7 +315,8 @@ export const todoEndpoints: Endpoint[] = [
     const back = await dueBack()
     const plannedToday = await q(`${TASK_SELECT} WHERE t.planned_for = $1 AND t.status <> 'done' ORDER BY ${urgencySql()} DESC`, [londonToday()])
     const urgent = await q(`${TASK_SELECT} WHERE t.urgent AND t.status <> 'done' ORDER BY ${urgencySql()} DESC, t.urgent_at`)
-    const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, doing: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
+    const stages = await briefingStages(`${urgencySql()} DESC`)
+    const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, doing: 0, waiting: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
     for (const r of counts) c[r.status] = r.n
     return {
       generated_at: new Date().toISOString(), counts: c, urgent: urgent.map(taskOut),
@@ -313,6 +327,7 @@ export const todoEndpoints: Endpoint[] = [
       to_do: toDo.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_priority: a.task_priority })),
       providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
       due_back: back.map((p) => ({ id: p.id, kind: p.kind, title: p.title, review_on: p.review_on, notes: p.notes })), planned_today: plannedToday.map(taskOut),
+      stages: stages.map(briefingStageOut),
     }
   }],
 
@@ -533,6 +548,56 @@ export const todoEndpoints: Endpoint[] = [
     return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length }
   }],
 
+  // ---------------------------------------------------------------- stages: go and ask, report back, move on
+  ['POST', '/tasks/:id/stages', async (req, p) => {
+    const b = await body(req, StagesIn)
+    const t = await getTask(p.id)
+    const made = await addStages(t.id, b.stages.map((x) => ({ ...x, who: x.kind === 'ask' ? x.who : '' })), 'tom')
+    if (!made.length) fail(409, `A task holds at most ${MAX_STAGES} stages.`)
+    await touch(t.id)
+    // The team drafts the message for the first open stage, or a closed task opens again on it.
+    if (b.run_now && t.status !== 'processing') await requeue(t.id, `stages added: ${made.map(stageLine).join('; ')}`)
+    else if (t.status === 'done') {
+      await q(`UPDATE tasks SET status = 'waiting' WHERE id = $1`, [t.id])
+      await logEvent(t.id, 'status', 'tom', { status: 'waiting', reason: 'stages added' })
+    }
+    return Response.json(await fullTask(t.id), { status: 201 })
+  }],
+  ['PATCH', '/stages/:id', async (req, p) => {
+    const b = await body(req, StagePatch)
+    const s = (await one(`SELECT * FROM task_stages WHERE id::text = $1`, [p.id])) || fail(404, 'Stage not found.')
+    if (s!.status !== 'open') fail(409, 'That stage is settled.')
+    if (s!.kind === 'ask' && b.who !== undefined && !b.who) fail(422, 'Say who to ask.')
+    await q(`UPDATE task_stages SET who = COALESCE($2, who), title = COALESCE($3, title), details = COALESCE($4, details) WHERE id = $1`,
+      [s!.id, s!.kind === 'ask' ? b.who ?? null : null, b.title ?? null, b.details ?? null])
+    await touch(s!.task_id)
+    return fullTask(s!.task_id)
+  }],
+  ['DELETE', '/stages/:id', async (_r, p) => {
+    const s = (await one(`SELECT * FROM task_stages WHERE id::text = $1`, [p.id])) || fail(404, 'Stage not found.')
+    if (s!.status !== 'open') fail(409, 'That stage is settled; it stays on the record.')
+    await q(`DELETE FROM task_stages WHERE id = $1`, [s!.id])
+    await q(`UPDATE actions SET status = 'superseded' WHERE task_id = $1 AND status = 'proposed' AND details->>'stage_id' = $2`, [s!.task_id, s!.id])
+    await logEvent(s!.task_id, 'stages', 'tom', { removed: stageLine(s!) })
+    await touch(s!.task_id)
+    // Its drafts went with it. With no stage left the team finishes the task; otherwise the task sits on the next one.
+    const st = await taskStatus(s!.task_id)
+    if (st === 'ready' || st === 'waiting') {
+      if (await hasOpenStage(s!.task_id)) await closeIfSettled(s!.task_id)
+      else if (st === 'waiting' || !(await one(`SELECT 1 FROM actions WHERE task_id = $1 AND status = 'proposed' LIMIT 1`, [s!.task_id]))) await requeue(s!.task_id, 'last stage removed')
+    }
+    return fullTask(s!.task_id)
+  }],
+  ['POST', '/stages/:id/answer', async (req, p) => {
+    const b = await body(req, StageAnswer)
+    return stageReply(await finishStage(p.id, 'answered', b.answer))
+  }],
+  ['POST', '/stages/:id/done', async (req, p) => {
+    const b = await body(req, StageDone)
+    return stageReply(await finishStage(p.id, 'done', b.outcome))
+  }],
+  ['POST', '/stages/:id/skip', async (_r, p) => stageReply(await finishStage(p.id, 'skipped', ''))],
+
   ['PATCH', '/actions/:id', async (req, p) => {
     const b = await body(req, ActionPatch)
     const a = (await one(`SELECT a.*, t.title AS task_title FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.id = $1`, [p.id])) || fail(404, 'Action not found.')
@@ -694,6 +759,37 @@ export const todoEndpoints: Endpoint[] = [
   ...memoryEndpoints,
   ...plannerEndpoints,
 ]
+
+/**
+ * Tom reports back on a stage: what they said (an ask), that it is done (a do), or to skip it. The answer is kept
+ * like any answer Tom gives, and the task moves on: back to the team for the next stage, or to finish with the
+ * answers when none is left. A task still waiting on Tom's own answers to the team resumes when those are in.
+ */
+export async function finishStage(stageId: string, outcome: 'answered' | 'done' | 'skipped', text: string, via?: string) {
+  const s = (await one(`SELECT s.*, t.status AS task_status, t.title AS task_title FROM task_stages s JOIN tasks t ON t.id = s.task_id WHERE s.id::text = $1`, [stageId]))
+    || fail(404, 'Stage not found.')
+  if (s!.status !== 'open') fail(409, 'That stage is already settled.')
+  if (s!.task_status === 'processing') fail(409, 'The agents are working on this task. Try again in a moment.')
+  if (outcome === 'answered' && s!.kind !== 'ask') outcome = 'done'
+  const settled = (await settleStage(s!.id, outcome, text))!
+  if (outcome !== 'skipped' && text.trim()) {
+    await keepNote('answer', s!.kind === 'ask' ? `${s!.who} on "${s!.title}": ${text.trim()}` : `${s!.title}: ${text.trim()}`,
+      { task: s!.task_title, stage: stageLine(s!), ...(via ? { via } : {}) }, `stage:${s!.id}`)
+  }
+  await touch(s!.task_id)
+  const next = await one(`SELECT * FROM task_stages WHERE task_id = $1 AND status = 'open' ORDER BY position, created_at LIMIT 1`, [s!.task_id])
+  const t = await getTask(s!.task_id)
+  let resumed = false
+  if (!(t.status === 'needs_input' && t.open_questions > 0)) {
+    await requeue(t.id, next ? `on to the next stage: ${stageLine(next)}` : 'every stage settled: finish the task')
+    resumed = true
+  }
+  return { stage: settled, next, resumed }
+}
+
+async function stageReply(r: Awaited<ReturnType<typeof finishStage>>) {
+  return { stage: stageOut(r.stage), next_stage: r.next ? stageOut(r.next) : null, task_resumed: r.resumed, task: await fullTask(r.stage.task_id) }
+}
 
 /** After Tom settles a question: every task it held counts as touched, and those with nothing left open go back to the team. */
 export async function settle(taskIds: string[], reason: string) {

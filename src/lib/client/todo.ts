@@ -3,7 +3,28 @@
 
 // Browser client for the Aimelia API. Same origin, authenticated by the HttpOnly session cookie.
 
-export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'doing' | 'done' | 'failed' | 'scheduled' | 'due'
+export type TaskStatus = 'queued' | 'processing' | 'needs_input' | 'ready' | 'doing' | 'waiting' | 'done' | 'failed' | 'scheduled' | 'due'
+
+/** One stage of a task worked in stages: someone to ask (and what they said), or a piece of work. */
+export interface Stage {
+  id: string
+  task_id: string
+  position: number
+  kind: 'ask' | 'do'
+  who: string
+  title: string
+  details: string
+  status: 'open' | 'done' | 'skipped'
+  answer: string | null
+  added_by: string
+  done_at: string | null
+  task_title?: string
+  task_priority?: number
+  task_status?: TaskStatus
+  stage_number?: number
+  stage_count?: number
+  earlier?: { kind: 'ask' | 'do'; who: string; title: string; answer: string | null; status: string }[]
+}
 
 export interface Question {
   id: string
@@ -88,6 +109,7 @@ export interface Task {
   questions?: Question[]
   actions?: Action[]
   events?: AgentEvent[]
+  stages?: Stage[]
 }
 
 export interface TaskFile {
@@ -198,6 +220,7 @@ export interface Briefing {
   urgent?: Task[]
   due_back?: { id: string; kind: 'project' | 'item'; title: string; review_on: string; notes: string }[]
   planned_today?: Task[]
+  stages?: Stage[]
 }
 
 export class ApiError extends Error {
@@ -246,6 +269,7 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   needs_input: 'Needs your answer',
   ready: 'Ready to approve',
   doing: 'With you to do',
+  waiting: 'Stage with you',
   done: 'Done',
   failed: 'Failed',
   scheduled: 'Scheduled',
@@ -259,6 +283,7 @@ export const STATUS_PILL: Record<TaskStatus, string> = {
   needs_input: 'Atrisk',
   ready: 'Ontrack',
   doing: 'Active',
+  waiting: 'Atrisk',
   done: 'Done',
   failed: 'Overdue',
   scheduled: 'Parked',

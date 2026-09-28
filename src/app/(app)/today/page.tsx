@@ -6,6 +6,7 @@ import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem, StatusPill } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+import { StageItem } from '@/components/tasks/Stages'
 import { BackActions, type Project } from '@/components/planner/Projects'
 import { FilterBar, filterQuery, useSettled, NO_FILTERS, type Filters } from '@/components/tasks/Filters'
 import Link from 'next/link'
@@ -14,7 +15,7 @@ import Link from 'next/link'
 const URGENT_NEXT: Record<string, string> = {
   queued: 'The team starts on it first.', processing: 'The team is on it now.',
   needs_input: 'The team needs your answer: it is at the top of Questions.', ready: 'Ready: approve it now in To approve.',
-  doing: 'Approved: do it now from To do.', due: 'Check it now in Follow-ups.', failed: 'The run failed: open it and run the team again.',
+  doing: 'Approved: do it now from To do.', waiting: 'Waiting on a stage: go and ask, then record the answer in Stages.', due: 'Check it now in Follow-ups.', failed: 'The run failed: open it and run the team again.',
   scheduled: 'Parked: open it and bring it back if it cannot wait.',
 }
 
@@ -32,9 +33,9 @@ function byTask(questions: Question[]) {
   return [...groups.values()]
 }
 
-type Section = 'questions' | 'approve' | 'todo' | 'follow' | 'overdue' | 'failed' | 'done'
+type Section = 'questions' | 'stages' | 'approve' | 'todo' | 'follow' | 'overdue' | 'failed' | 'done'
 const SECTIONS: { key: Section; label: string }[] = [
-  { key: 'questions', label: 'Questions' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'overdue', label: 'Past due' }, { key: 'failed', label: 'Failed runs' }, { key: 'done', label: 'Completed' },
+  { key: 'questions', label: 'Questions' }, { key: 'stages', label: 'To ask' }, { key: 'approve', label: 'To approve' }, { key: 'todo', label: 'To do' }, { key: 'follow', label: 'Follow-ups' }, { key: 'overdue', label: 'Past due' }, { key: 'failed', label: 'Failed runs' }, { key: 'done', label: 'Completed' },
 ]
 const TAB_KEY = 'aimelia.today.tab'
 
@@ -83,19 +84,20 @@ export default function Today() {
   const dash = '–'
   // The filter bar narrows every section; the figures along the top stay whole.
   const questions = (brief?.questions || []).filter((x) => passes(f, x.task_priority, x.question, x.why, x.task_title, ...(x.also_for || []).map((t) => t.title)))
+  const stages = (brief?.stages || []).filter((s) => passes(f, s.task_priority, s.title, s.details, s.who, s.task_title))
   const approvals = (brief?.actions || []).filter((a) => passes(f, a.task_priority, a.title, a.content, a.task_title))
   const toDo = (brief?.to_do || []).filter((a) => passes(f, a.task_priority, a.title, a.content, a.task_title))
   const followUps = (brief?.follow_ups || []).filter((t) => passes(f, t.priority, t.title, t.notes))
   const upcoming = (brief?.upcoming_follow_ups || []).filter((t) => passes(f, t.priority, t.title, t.notes))
   const pastDue = overdueTasks.filter((t) => passes(f, t.priority, t.title, t.notes, t.summary))
   const failed = (brief?.failed || []).filter((t) => passes(f, t.priority, t.title, t.notes, t.summary))
-  const sizes: Record<Section, number> = { questions: questions.length, approve: approvals.length, todo: toDo.length,
+  const sizes: Record<Section, number> = { questions: questions.length, stages: stages.length, approve: approvals.length, todo: toDo.length,
     follow: followUps.length, overdue: pastDue.length, failed: failed.length, done: done?.length || 0 }
   // Until Tom picks one, open the first section with something in it.
   // Past due and Failed runs are only offered while they have something in them.
   const shown = (k: Section) => (k !== 'failed' || !!brief?.failed.length) && (k !== 'overdue' || overdue > 0)
   const tab: Section = chosen && shown(chosen) ? chosen
-    : (['questions', 'approve', 'todo', 'follow', 'failed'] as Section[]).find((k) => sizes[k]) || 'questions'
+    : (['questions', 'stages', 'approve', 'todo', 'follow', 'failed'] as Section[]).find((k) => sizes[k]) || 'questions'
   // Completed work, the last month of it, searched on the server with the same filters.
   const settled = useSettled(f, 250)
   const doneQs = filterQuery({ ...settled, view: 'done', closed: '30' }, { limit: '100' })
@@ -111,10 +113,11 @@ export default function Today() {
   }
 
   return (
-    <Shell title="Today" sub="What needs you: questions from the team, work to approve, what you approved to do, and checks on it."
+    <Shell title="Today" sub="What needs you: questions from the team, people to ask, work to approve, what you approved to do, and checks on it."
       actions={<><button className="btn ghost" onClick={load}>Refresh</button><button className="btn ghost" onClick={runAll}>Run the team now</button></>}>
       <div className="kpis">
         <div role="button" tabIndex={0} onClick={() => pick('questions')} onKeyDown={(e) => e.key === 'Enter' && pick('questions')} className={`kpi go ${brief?.questions.length ? 'warn' : 'none'}`}><span className="n">{brief ? brief.questions.length : dash}</span><span className="l">Questions for you</span></div>
+        <div role="button" tabIndex={0} onClick={() => pick('stages')} onKeyDown={(e) => e.key === 'Enter' && pick('stages')} className={`kpi go ${brief?.stages?.length ? 'warn' : 'none'}`}><span className="n">{brief ? brief.stages?.length ?? 0 : dash}</span><span className="l">To ask and report back</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('approve')} onKeyDown={(e) => e.key === 'Enter' && pick('approve')} className={`kpi go ${brief?.actions.length ? '' : 'none'}`}><span className="n">{brief ? brief.actions.length : dash}</span><span className="l">Ready to approve</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('follow')} onKeyDown={(e) => e.key === 'Enter' && pick('follow')} className={`kpi go ${brief?.follow_ups.length ? 'warn' : 'none'}`}><span className="n">{brief ? brief.follow_ups.length : dash}</span><span className="l">Follow-ups due</span></div>
         <div role="button" tabIndex={0} onClick={() => pick('todo')} onKeyDown={(e) => e.key === 'Enter' && pick('todo')} className={`kpi go ${toDo.length ? '' : 'none'}`}><span className="n">{brief ? toDo.length : dash}</span><span className="l">Approved, to do</span></div>
@@ -154,7 +157,7 @@ export default function Today() {
                 </div>
               ))}</div>
           )}
-          <p className="cap today-flow">Answer the questions, approve the work, do what you approved, then check it came back.{working ? ` The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</p>
+          <p className="cap today-flow">Answer the questions, ask who you need to ask, approve the work, do what you approved, then check it came back.{working ? ` The team is working on ${working} task${working === 1 ? '' : 's'}.` : ''}</p>
           <FilterBar f={f} set={setF} full={false} />
           <div className="main-tabs today-tabs" role="tablist">
             {SECTIONS.filter((x) => shown(x.key)).map((x) => (
@@ -173,6 +176,12 @@ export default function Today() {
                     {g.map((q) => <QuestionItem key={q.id} q={q} onDone={load} showTask={false} />)}
                   </div>
                 ))}</div>
+          )}
+
+          {tab === 'stages' && (
+            <div className="card"><h2>Go and ask, then report back <span className="hcount">{stages.length}</span></h2>
+              {stages.length === 0 ? <div className="emptyrow">{brief.stages?.length ? 'Nothing matches the filter.' : 'Nobody to ask. A task that hangs on someone else\'s answer is worked in stages: go and ask them, record what they said here, and the team takes it into the next stage.'}</div>
+                : stages.map((s) => <StageItem key={s.id} s={s} onDone={load} onOpen={() => setOpenTask(s.task_id)} />)}</div>
           )}
 
           {tab === 'approve' && (
