@@ -83,6 +83,13 @@ is unavailable the tasks stay as typed.
   their tasks. Answering or skipping it on any of those tasks settles all of them, and each task with nothing left open
   goes back to the team. Today shows the question once, tagged with every task it covers, and groups a task's questions
   together.
+- **Answering with files.** An answer can be words, files or both: screenshots (pick them, drop them on the question, or
+  paste one straight into the answer box), documents, transcripts, exported or copied chats (with Claude or anyone
+  else; paste the text, or attach it as .txt, .md, .json or PDF). The files are stored on every task the question
+  holds and Claude reads each once for what it shows in answer to the question: the answer, the facts exactly as they
+  appear, and what is still open. They are not assessed like a policy. The team waits for the reads, then works from
+  them as Tom's answer and does not ask again for anything they settle. They show in the task's documents, marked as
+  given with the answer.
 - **The tidy job** runs on every background tick when the list has changed since the last run, and needs an AI key. The AI
   reads every open question with its task, Tom's answers from the last 120 days and what Aimelia knows. It merges questions
   that one answer would settle (across tasks too), rewords any that newer answers have made out of date, and answers any

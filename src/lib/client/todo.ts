@@ -108,7 +108,12 @@ export interface TaskFile {
     findings: { ref: string; rating: 'red' | 'amber' | 'green'; finding: string; requirement: string; change: string }[]
     missing: string[]
     questions: string[]
+    answer?: string
+    facts?: string[]
+    open?: string[]
   } | null
+  role?: 'document' | 'evidence'
+  question_id?: string | null
 }
 
 export interface Agent {

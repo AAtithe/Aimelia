@@ -12,7 +12,7 @@ import { inflateRawSync } from 'node:zlib'
 
 export class ImportError extends Error {}
 
-export const IMPORT_TYPES = ['.docx', '.pdf', '.txt', '.md', '.csv', '.vtt', '.srt']
+export const IMPORT_TYPES = ['.docx', '.pdf', '.txt', '.md', '.csv', '.vtt', '.srt', '.json']
 
 /** A PDF by name, checked by its header so a renamed file is not sent to Claude. */
 export function isPdf(filename: string, buf: Buffer): boolean {
