@@ -23,7 +23,9 @@ export const DEFAULT_MODELS: Record<Exclude<Provider, 'auto'>, string> = {
   mock: 'mock',
 }
 
-export class LLMError extends Error {}
+export class LLMError extends Error {
+  status?: number // the HTTP status from the provider, when there was one
+}
 
 export type Attachment = { kind: 'image' | 'pdf'; media_type: string; data: string; name: string } // data is base64
 export type Message = { role: 'user' | 'assistant'; content: string; files?: Attachment[] }
@@ -177,7 +179,9 @@ export async function complete(call: ModelCall): Promise<string> {
     return await transport({ ...call, provider, model })
   } catch (e) {
     if (e instanceof LLMError) throw e
-    throw new LLMError(`${provider} ${model}: ${(e as Error).message}`)
+    const err = new LLMError(`${provider} ${model}: ${(e as Error).message}`)
+    if (Number.isInteger((e as any)?.status)) err.status = (e as any).status
+    throw err
   }
 }
 

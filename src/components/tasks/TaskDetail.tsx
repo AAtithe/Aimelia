@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { api, Task, AgentEvent, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime } from '@/lib/client/todo'
+import Link from 'next/link'
+import { api, Task, TaskFailure, AgentEvent, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime } from '@/lib/client/todo'
 import { ActionItem, QuestionItem, StatusPill } from './Cards'
 import { useShell } from '@/components/Shell'
 import { Documents } from './Documents'
@@ -85,6 +86,12 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
               <div className="note bad" style={{ marginTop: 10 }}>
                 <b>Urgent and vital.</b> {task.urgent_reason || 'No reason given.'}{' '}
                 {task.urgent_by && task.urgent_by !== 'tom' ? `Marked by ${task.urgent_by === 'aimelia' ? 'Aimelia when you added it' : task.urgent_by}; clear it if it is not.` : 'Marked by you.'}
+              </div>
+            )}
+            {task.status === 'failed' && <FailureNote f={task.failure ?? null} />}
+            {task.status === 'queued' && task.retry_at && task.failure && (
+              <div className="note warn" style={{ marginTop: 10 }}>
+                <b>Trying again by itself at {fmtDateTime(task.retry_at).slice(-5)}.</b> {task.failure.title} {task.failure.fix}
               </div>
             )}
             {task.summary && <p className="cap" style={{ marginTop: 8 }}>{task.summary}</p>}
@@ -201,6 +208,23 @@ export function TaskDetail({ taskId, onClose, onChanged }: { taskId: string; onC
   )
 }
 
+/** Why the run failed, what to do about it, and where; the raw error tucked away for whoever maintains Aimelia. */
+function FailureNote({ f }: { f: TaskFailure | null }) {
+  if (!f) return <div className="note bad" style={{ marginTop: 10 }}><b>The run failed.</b> The reason is in How the team worked below. Run the team again; if it fails the same way, send that line to whoever maintains Aimelia.</div>
+  return (
+    <div className="note bad" style={{ marginTop: 10 }}>
+      <div><b>Why it failed.</b> {f.title}</div>
+      <div style={{ marginTop: 6 }}><b>What to do.</b> {f.fix}{f.where && <> <Link href={f.where.href}>{f.where.label}</Link></>}</div>
+      {f.detail && (
+        <details style={{ marginTop: 6 }}>
+          <summary className="cap" style={{ cursor: 'pointer' }}>Technical detail{f.agent ? ` (${f.agent})` : ''}, {fmtDateTime(f.at)}</summary>
+          <div className="cap" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>{f.detail}</div>
+        </details>
+      )}
+    </div>
+  )
+}
+
 function EventRow({ e }: { e: AgentEvent }) {
   const c = e.content || {}
   let text = ''
@@ -212,7 +236,7 @@ function EventRow({ e }: { e: AgentEvent }) {
   else if (e.kind === 'stages') text = c.added ? `Laid out ${c.added.length} stage${c.added.length === 1 ? '' : 's'}: ${c.added.join('; ')}` : `Removed the stage ${c.removed}`
   else if (e.kind === 'stage') text = c.outcome === 'skipped' ? `Skipped the stage ${c.stage}` : c.kind === 'ask' ? `${c.who} answered "${c.stage.replace(/^Ask [^:]*: /, '')}": ${c.answer}` : `Stage done: ${c.stage}${c.answer ? `. ${c.answer}` : ''}`
   else if (e.kind === 'feedback') text = c.text
-  else if (e.kind === 'error') text = c.error
+  else if (e.kind === 'error') text = c.title ? `${c.title} ${c.retrying_in_minutes ? `Trying again in ${c.retrying_in_minutes} minutes (try ${c.try} of ${c.of}).` : `To fix: ${c.fix}`}` : c.error
   else if (e.kind === 'documents') text = c.attached ? `Attached ${c.attached.join(', ')}${c.check_against ? `, to check against ${c.check_against}` : ''}`
     : c.read ? `Read and assessed ${c.read}${c.overall ? `: ${c.overall}` : ''}` : c.removed ? `Removed ${c.removed}` : `Could not read ${c.could_not_read}: ${c.error}`
   else if (e.kind === 'lookup') text = c.error ? `Could not look anything up: ${c.error}` : `Looked up ${(c.calls || []).map((x: any) => `${x.call}${x.error ? ' (failed)' : ''}${x.why ? `: ${x.why}` : ''}`).join('; ')}`

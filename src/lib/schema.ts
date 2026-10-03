@@ -467,6 +467,11 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     applied_at timestamptz
   )`,
+  // ---------------------------------------------------------------- why a run failed and what to do (agents/failure.ts)
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS failure jsonb`,
+  // A passing problem is retried by itself: the task waits in the queue until retry_at, auto_retries times at most.
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS retry_at timestamptz`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_retries int NOT NULL DEFAULT 0`,
   // ---------------------------------------------------------------- tasks worked in stages
   // Go and ask someone, come back with the answer, then the next stage. The current stage is the first one open.
   `CREATE TABLE IF NOT EXISTS task_stages (

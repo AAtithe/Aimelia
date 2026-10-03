@@ -98,6 +98,8 @@ export interface Task {
   urgent_reason?: string | null
   urgent_by?: string | null
   urgency?: { score: number; reason: string | null }
+  failure?: TaskFailure | null
+  retry_at?: string | null
   calendar_event: { id: string; start: string; end: string; link?: string } | null
   stale_nudged_at: string | null
   source?: string | null
@@ -110,6 +112,18 @@ export interface Task {
   actions?: Action[]
   events?: AgentEvent[]
   stages?: Stage[]
+}
+
+/** Why the last run failed and what to do about it (src/lib/agents/failure.ts). */
+export interface TaskFailure {
+  code: string
+  title: string
+  fix: string
+  where: { label: string; href: string } | null
+  retry: boolean
+  agent: string | null
+  detail: string
+  at: string
 }
 
 export interface TaskFile {
