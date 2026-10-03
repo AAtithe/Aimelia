@@ -424,6 +424,19 @@ export const SCHEMA: string[] = [
   // A file Tom gave with his answer to a question: read for what it shows, not assessed like a policy.
   `ALTER TABLE task_files ADD COLUMN IF NOT EXISTS question_id uuid`,
   `ALTER TABLE task_files ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'document'`,
+  // ---------------------------------------------------------------- the efficiency agent
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS reviewed_at timestamptz`, // Tom checked an answer Aimelia gave for him
+  `ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS efficiency_enabled boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS efficiency_time text NOT NULL DEFAULT '06:30'`,
+  `CREATE TABLE IF NOT EXISTS efficiency_runs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    day text NOT NULL,
+    trigger text NOT NULL DEFAULT 'daily',
+    report jsonb,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS efficiency_runs_daily_idx ON efficiency_runs (day) WHERE trigger = 'daily'`,
   // ---------------------------------------------------------------- planner, projects and items to come back to
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS planned_for text`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimate_minutes int`,

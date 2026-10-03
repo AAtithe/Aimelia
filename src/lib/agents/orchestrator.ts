@@ -24,7 +24,8 @@ import { lessonsForContext } from './lessons'
 import { documentsForContext } from './documents'
 import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
-import { BLOCKING, recordQuestions } from './questions'
+import { BLOCKING, recordQuestions, similarity, SAME } from './questions'
+import { earlierAnswers, recordScreened, screenQuestions } from './efficiency'
 import { markUrgent } from './triage'
 import { URGENT_WORDS, urgencySql } from './urgency'
 import { addStages, cleanStages, currentStage, stagesForContext, tagForStage } from './stages'
@@ -40,6 +41,7 @@ export const ACTION_KINDS = new Set(['email_draft', 'document', 'checklist', 'de
 export type Pipeline = {
   max_revisions: number; approval_threshold: number; max_questions_per_run: number; auto_run: boolean
   house_rules: string; team_directory: string; defaults_version: number; stale_days: number; follow_up_days: number
+  efficiency_enabled?: boolean; efficiency_time?: string
   lessons_in_context: number; brief_enabled: boolean; brief_time: string; brief_weekends: boolean
   last_brief_date: string | null; work_start: string; work_end: string; focus_minutes: number; use_ws_systems: boolean
 }
@@ -134,6 +136,8 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
     task: { title: task.title, notes: task.notes || '', priority: task.priority, due_date: task.due_date, today: londonToday(),
       ...(task.urgent ? { urgent_and_vital: task.urgent_reason || true, urgency_rule: 'Tom needs this dealt with first and fast: keep it short and get it moving.' } : {}) },
     answered_questions: questions.filter((x) => x.status === 'answered').map((x) => ({ question: x.question, answer: x.answer })),
+    tom_answered_on_other_tasks: await earlierAnswers(`${task.title} ${task.notes || ''}`, task.id, 10, 1),
+    how_to_use_earlier_answers: 'Answers Tom gave on other tasks that may bear on this one. Use them rather than asking him again, where they plainly apply here.',
     questions_tom_declined: questions.filter((x) => x.status === 'dismissed').map((x) => x.question),
     tom_feedback: feedback.map((e) => e.content?.text).filter(Boolean),
     previous_actions: previous.map((a) => ({ title: a.title, kind: a.kind, status: a.status, tom_feedback: a.user_feedback })),
@@ -232,9 +236,22 @@ export async function runTask(taskId: string): Promise<string> {
 
 async function pauseForInput(taskId: string, askedBy: string, asked: AskedQuestion[], limit: number, attempt: number): Promise<string> {
   const toAsk = asked.slice(0, Math.max(limit, 1))
-  await recordQuestions(taskId, askedBy, toAsk)
   await logEvent(taskId, 'question', askedBy, { questions: toAsk }, attempt)
+  // The efficiency agent sees new questions first: what Tom has already answered is answered for him, and what is
+  // already waiting on another task is joined to it. Repeats on this task are dropped before that.
+  const known = (await q(`SELECT question FROM questions WHERE task_id = $1`, [taskId])).map((r) => r.question as string)
+  const fresh = toAsk.filter((a) => !known.some((k) => similarity(k, a.question) >= SAME))
+  const task = (await one(`SELECT id, title, notes FROM tasks WHERE id = $1`, [taskId]))!
+  const screened = await screenQuestions(task, fresh)
+  await recordScreened(taskId, askedBy, screened)
+  await recordQuestions(taskId, askedBy, screened.ask)
   const open = await one(`SELECT 1 FROM questions WHERE task_id = $1 AND status IN ${BLOCKING} LIMIT 1`, [taskId])
+  if (!open && screened.answered.length) {
+    // Everything it asked was already answered: straight back to the team, Tom is not disturbed.
+    await q(`UPDATE tasks SET status = 'queued' WHERE id = $1`, [taskId])
+    await logEvent(taskId, 'status', 'aimelia', { status: 'queued', reason: `answered ${screened.answered.length === 1 ? 'the question' : `${screened.answered.length} questions`} from what you told Aimelia before` })
+    return 'queued'
+  }
   if (!open) {
     // Every question was a repeat of one already answered or declined: flag it rather than loop.
     await q(`UPDATE tasks SET status = 'failed' WHERE id = $1`, [taskId])

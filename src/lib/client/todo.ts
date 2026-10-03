@@ -164,6 +164,8 @@ export interface Pipeline {
   team_directory: string
   stale_days: number
   follow_up_days: number
+  efficiency_enabled: boolean
+  efficiency_time: string
   lessons_in_context: number
   brief_enabled: boolean
   brief_time: string

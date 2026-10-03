@@ -23,6 +23,8 @@ import { attachFiles, FILE_COLS, fileOut, readTaskFiles } from './documents'
 import { answerQuestion, BLOCKING, dismissQuestion, questionTasks } from './questions'
 import { markUrgent } from './triage'
 import { urgencyOf, urgencySql } from './urgency'
+import { lastEfficiencyRun, runEfficiency } from './efficiency'
+import { addMemory } from '../memory/store'
 import { memoryEndpoints } from '../memory/api'
 import { plannerEndpoints } from '../planner/api'
 import { dueBack } from '../planner/projects'
@@ -55,7 +57,7 @@ const AgentPatch = AgentIn.partial()
 const Reorder = z.object({ ids: z.array(z.string()) })
 const PipelinePatch = z.object({
   max_revisions: z.number().int().min(0).max(5), approval_threshold: z.number().min(0).max(10), max_questions_per_run: z.number().int().min(1).max(10),
-  auto_run: z.boolean(), house_rules: z.string(), team_directory: z.string(), stale_days: z.number().int().min(0).max(365), follow_up_days: z.number().int().min(0).max(60),
+  auto_run: z.boolean(), house_rules: z.string(), team_directory: z.string(), stale_days: z.number().int().min(0).max(365), follow_up_days: z.number().int().min(0).max(60), efficiency_enabled: z.boolean(), efficiency_time: z.string().regex(/^\d{2}:\d{2}$/),
   lessons_in_context: z.number().int().min(0).max(30), brief_enabled: z.boolean(), brief_time: hhmm, brief_weekends: z.boolean(),
   work_start: hhmm, work_end: hhmm, focus_minutes: z.number().int().min(15).max(480), use_ws_systems: z.boolean(),
 }).partial()
@@ -125,7 +127,7 @@ const agentOut = (a: Row) => {
 }
 const pipelineOut = (p: Row) => ({
   max_revisions: p.max_revisions, approval_threshold: p.approval_threshold, max_questions_per_run: p.max_questions_per_run, auto_run: p.auto_run,
-  house_rules: p.house_rules, team_directory: p.team_directory, stale_days: p.stale_days, follow_up_days: p.follow_up_days ?? 7, lessons_in_context: p.lessons_in_context,
+  house_rules: p.house_rules, team_directory: p.team_directory, stale_days: p.stale_days, follow_up_days: p.follow_up_days ?? 7, efficiency_enabled: p.efficiency_enabled ?? true, efficiency_time: p.efficiency_time ?? '06:30', lessons_in_context: p.lessons_in_context,
   brief_enabled: p.brief_enabled, brief_time: p.brief_time, brief_weekends: p.brief_weekends, last_brief_date: p.last_brief_date,
   work_start: p.work_start, work_end: p.work_end, focus_minutes: p.focus_minutes, use_ws_systems: p.use_ws_systems,
 })
@@ -567,6 +569,50 @@ export const todoEndpoints: Endpoint[] = [
     // Files still being read hold the task back (the team waits for them), so read them now and then run the team.
     if (given.length) runLater(async () => { await readTaskFiles(); await processQueue({ limit: 5 }) })
     return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length, files: given.length }
+  }],
+  // ---------------------------------------------------------------- the efficiency agent
+  ['GET', '/efficiency', async () => {
+    const p = await getPipeline()
+    const answered = await q(`SELECT qn.*, t.title AS task_title FROM questions qn JOIN tasks t ON t.id = qn.task_id
+      WHERE qn.answered_by = 'aimelia' AND qn.reviewed_at IS NULL AND qn.answered_at > now() - interval '14 days' ORDER BY qn.answered_at DESC LIMIT 50`)
+    const sources = await q(`SELECT e.content FROM events e WHERE e.kind = 'answer' AND e.actor = 'aimelia' AND e.created_at > now() - interval '14 days'`)
+    const from = new Map(sources.map((e) => [String(e.content?.question || ''), String(e.content?.source || '')]))
+    const run = await lastEfficiencyRun()
+    const kept = new Set((await q(`SELECT subject FROM memories WHERE status = 'active'`)).map((m) => String(m.subject).toLowerCase()))
+    const week = await one(`SELECT count(*) FILTER (WHERE answered_by = 'aimelia')::int AS answered,
+        count(*) FILTER (WHERE status = 'merged' OR merged_into IS NOT NULL)::int AS merged FROM questions WHERE created_at > now() - interval '7 days'`)
+    return {
+      enabled: p.efficiency_enabled ?? true, time: p.efficiency_time ?? '06:30',
+      answered_for_you: answered.map((x) => ({ ...questionOut(x), task_title: x.task_title, source: from.get(x.question) || null })),
+      recurring: ((run?.report?.recurring || []) as any[]).filter((r) => !kept.has(String(r.topic).toLowerCase())),
+      last_run: run ? { at: iso(run.finished_at), trigger: run.trigger, report: run.report } : null,
+      this_week: week,
+    }
+  }],
+  ['POST', '/efficiency/run', async () => ({ run: await runEfficiency('manual') })],
+  // Keep a standing answer: Tom's own words, so it is pinned, and every agent and the efficiency agent draw on it.
+  ['POST', '/efficiency/standing', async (req) => {
+    const b = await body(req, z.object({ topic: z.string().trim().min(1).max(200), answer: z.string().trim().min(1).max(1000) }))
+    const m = await addMemory({ kind: 'fact', subject: b.topic, content: b.answer, pinned: true, sources: [{ source: 'efficiency', label: 'A standing answer you kept', quote: b.answer, at: new Date().toISOString() }] }, 'tom', 'kept as a standing answer')
+    return Response.json({ memory: m ? { id: m.id, subject: m.subject, content: m.content } : null }, { status: 201 })
+  }],
+  ['POST', '/questions/:id/confirm', async (_r, p) => {
+    const qn = (await one(`UPDATE questions SET reviewed_at = now() WHERE id = $1 AND answered_by = 'aimelia' RETURNING *`, [p.id])) || fail(404, 'No answer from Aimelia to confirm.')
+    return { question: questionOut(qn!) }
+  }],
+  // Not right: the question goes back to Tom and its task waits for him, whatever it was doing with the wrong answer.
+  ['POST', '/questions/:id/reopen', async (_r, p) => {
+    const qn = (await one(`SELECT * FROM questions WHERE id = $1 AND answered_by = 'aimelia' AND status = 'answered'`, [p.id])) || fail(404, 'No answer from Aimelia to undo.')
+    const t = await getTask(qn!.task_id)
+    if (t.status === 'processing') fail(409, 'The team is working on this task. Try again in a moment.')
+    await q(`UPDATE questions SET status = 'open', answer = NULL, answered_at = NULL, answered_by = NULL, reviewed_at = NULL, updated_at = now() WHERE id = $1`, [qn!.id])
+    if (t.status !== 'done') {
+      await q(`UPDATE actions SET status = 'superseded' WHERE task_id = $1 AND status = 'proposed'`, [t.id])
+      await q(`UPDATE tasks SET status = 'needs_input', updated_at = now() WHERE id = $1`, [t.id])
+    }
+    await logEvent(t.id, 'question_update', 'tom', { text: `Aimelia's answer to "${qn!.question}" was not right: asked again.` })
+    await touch(t.id)
+    return { question: questionOut((await one(`SELECT * FROM questions WHERE id = $1`, [qn!.id]))!), task: taskOut(await getTask(t.id)) }
   }],
   ['POST', '/questions/:id/dismiss', async (_r, p) => {
     const r = (await dismissQuestion(p.id)) || fail(404, 'Question not found.')

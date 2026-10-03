@@ -101,6 +101,20 @@ is unavailable the tasks stay as typed.
   their tasks. Answering or skipping it on any of those tasks settles all of them, and each task with nothing left open
   goes back to the team. Today shows the question once, tagged with every task it covers, and groups a task's questions
   together.
+- **The efficiency agent** (`src/lib/agents/efficiency.ts`) makes sure Tom is asked each thing once.
+  - At the door: before an agent's question reaches Tom, it is checked against every answer he has given on any task
+    (and what the files he gave showed), what Aimelia knows, and the questions already waiting on other tasks. One he
+    has already answered is answered for him, marked as answered by Aimelia with where it came from, and the task goes
+    straight back to the team. One already waiting elsewhere is joined to it. Only what is new reaches him. When in
+    doubt it asks; it answers at most six questions on any one task.
+  - Every agent also sees the answers Tom gave on other tasks that bear on its task, so it asks less to begin with.
+  - Daily at 06:30 London (Automation sets the time or turns it off), before the morning push: a full sweep of the
+    waiting questions, and a look back over two months for questions that keep coming back, each with a standing answer
+    drawn from Tom's own answers. Keeping one puts it in What Aimelia knows, pinned as his, and the team uses it instead
+    of asking. "Check my questions now" on Today runs the sweep at once.
+  - On Today, Questions shows what it answered for Tom to check: Right, or Not right, ask me, which reopens the question
+    and holds the task (dropping any drafts built on the wrong answer) until he answers. The morning push says how many
+    it answered overnight.
 - **Answering with files.** An answer can be words, files or both: screenshots (pick them, drop them on the question, or
   paste one straight into the answer box), documents, transcripts, exported or copied chats (with Claude or anyone
   else; paste the text, or attach it as .txt, .md, .json or PDF). The files are stored on every task the question

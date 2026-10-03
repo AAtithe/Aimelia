@@ -167,6 +167,10 @@
 .ws .answer-file{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;font-weight:600;color:var(--navy);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:4px 9px}
 .ws .answer-file .cap{margin:0;font-weight:400}
 
+/* --- the efficiency agent's line above the questions --- */
+.ws .effline{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 12px}
+.ws .effline .cap{margin:0;flex:1 1 300px}
+
 /* --- To do: an approved action and how to carry it out --- */
 .ws .todo .todo-how{color:var(--navy);font-weight:600;margin-top:4px}
 .ws .todo-steps{list-style:none;margin:8px 0 0;padding:0}
