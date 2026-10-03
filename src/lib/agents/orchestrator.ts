@@ -12,7 +12,7 @@
  *     never approved, the actions are still saved but flagged.
  */
 import { json, one, q, type Row } from '../db'
-import { completeJson, LLMError } from '../llm'
+import { completeJson, LLMError, type ModelCall } from '../llm'
 import { londonToday } from '../dates'
 import {
   CAPTURE_PROMPT, DEFAULT_AGENTS, DEFAULT_HOUSE_RULES, DEFAULTS_VERSION, REVIEWER_CONTRACT,
@@ -25,6 +25,7 @@ import { gatherFacts } from './sources'
 import { BLOCKING, recordQuestions } from './questions'
 import { markUrgent } from './triage'
 import { URGENT_WORDS, urgencySql } from './urgency'
+import { AgentError, RETRY_MINUTES, explain, explainError, type Failure } from './failure'
 
 const FOLLOW_UP_INSTRUCTIONS = {
   delegate: 'The work was delegated and has not come back. Draft a short, firm chaser to the owner (kind delegate, same owner, a new due date) and say what Tom should check.',
@@ -150,6 +151,15 @@ export async function buildContext(task: Row, pipeline: Pipeline, facts: unknown
   }
 }
 
+/** One agent's call; a failure carries the agent's name, so the fix can say which one to look at. */
+async function ask(agent: Agent, call: Omit<ModelCall, 'json' | 'messages'>) {
+  try {
+    return await completeJson(call)
+  } catch (e) {
+    throw new AgentError(agent.name, e)
+  }
+}
+
 const systemPrompt = (agent: Agent, houseRules: string, contract: string) =>
   `${agent.instructions.trim()}\n\nHouse rules:\n${(houseRules || '').trim()}\n${contract}`
 
@@ -174,7 +184,7 @@ export async function runTask(taskId: string): Promise<string> {
       const payload = { ...context, draft_actions: draft, reviewer_feedback: reviewerFeedback, attempt,
         can_ask_questions: agent.can_ask_questions, you_are: agent.name }
       const started = Date.now()
-      const reply = await completeJson({
+      const reply = await ask(agent, {
         provider: agent.provider as any, model: agent.model, role: 'worker', temperature: agent.temperature, payload,
         system: systemPrompt(agent, pipeline.house_rules, agent.can_ask_questions ? WORKER_CONTRACT : WORKER_CONTRACT_NO_QUESTIONS),
       })
@@ -192,7 +202,7 @@ export async function runTask(taskId: string): Promise<string> {
     if (!reviewers.length) break
     const verdicts: any[] = []
     for (const agent of reviewers) {
-      const reply = await completeJson({
+      const reply = await ask(agent, {
         provider: agent.provider as any, model: agent.model, role: 'reviewer', temperature: agent.temperature,
         system: systemPrompt(agent, pipeline.house_rules, agent.can_ask_questions ? REVIEWER_CONTRACT : REVIEWER_CONTRACT_NO_QUESTIONS),
         payload: { ...context, draft_actions: draft, attempt, approval_threshold: pipeline.approval_threshold, can_ask_questions: agent.can_ask_questions },
@@ -227,11 +237,9 @@ async function pauseForInput(taskId: string, askedBy: string, asked: AskedQuesti
   const open = await one(`SELECT 1 FROM questions WHERE task_id = $1 AND status IN ${BLOCKING} LIMIT 1`, [taskId])
   if (!open) {
     // Every question was a repeat of one already answered or declined: flag it rather than loop.
-    await q(`UPDATE tasks SET status = 'failed' WHERE id = $1`, [taskId])
-    await logEvent(taskId, 'error', 'orchestrator', { error: 'The agents repeated questions that were already answered or declined. Add to the brief and run again.' })
-    return 'failed'
+    return failTask(taskId, explain('repeated_questions'))
   }
-  await q(`UPDATE tasks SET status = 'needs_input' WHERE id = $1`, [taskId])
+  await q(`UPDATE tasks SET status = 'needs_input', auto_retries = 0 WHERE id = $1`, [taskId])
   return 'needs_input'
 }
 
@@ -252,11 +260,41 @@ async function saveActions(taskId: string, draft: Draft[], approved: boolean,
     )
   }
   const flag = approved ? null : `Reviewer did not approve after ${maxRevisions + 1} attempts. Check before using. ${review.notes}`.trim()
-  const status = draft.length ? 'ready' : 'failed'
-  await q(`UPDATE tasks SET status = $2, review_flag = $3 WHERE id = $1`, [taskId, status, flag])
-  if (!draft.length) await logEvent(taskId, 'error', 'orchestrator', { error: 'The agents produced no actions.' })
-  await logEvent(taskId, 'status', 'orchestrator', { status, approved, actions: draft.length })
-  return status
+  if (!draft.length) return failTask(taskId, explain('no_actions'))
+  await q(`UPDATE tasks SET status = 'ready', review_flag = $2, auto_retries = 0 WHERE id = $1`, [taskId, flag])
+  await logEvent(taskId, 'status', 'orchestrator', { status: 'ready', approved, actions: draft.length })
+  return 'ready'
+}
+
+// ---------------------------------------------------------------- failures
+
+const failureEvent = (f: Failure, extra: Record<string, unknown> = {}) =>
+  ({ error: f.detail || `${f.title} ${f.fix}`, code: f.code, title: f.title, fix: f.fix, agent: f.agent, ...extra })
+
+/** The task stops as failed, with the reason and what Tom does about it on the task itself. */
+export async function failTask(taskId: string, f: Failure): Promise<'failed'> {
+  await q(`UPDATE tasks SET status = 'failed', failure = $2::jsonb, retry_at = NULL, auto_retries = 0 WHERE id = $1`, [taskId, json(f)])
+  await logEvent(taskId, 'error', 'orchestrator', failureEvent(f))
+  return 'failed'
+}
+
+/**
+ * A run threw. A passing problem goes back in the queue to be tried again in a few minutes, up to RETRY_MINUTES
+ * times; anything else, or one that keeps happening, fails the task with the reason and the fix.
+ */
+export async function handleRunError(taskId: string, e: unknown): Promise<'queued' | 'failed'> {
+  const f = explainError(e)
+  const t = await one<{ auto_retries: number }>(`SELECT auto_retries FROM tasks WHERE id = $1`, [taskId])
+  if (!t) return 'failed'
+  const tries = t.auto_retries ?? 0
+  if (f.retry && tries < RETRY_MINUTES.length) {
+    const minutes = RETRY_MINUTES[tries]
+    await q(`UPDATE tasks SET status = 'queued', failure = $2::jsonb, retry_at = now() + ($3 || ' minutes')::interval, auto_retries = auto_retries + 1 WHERE id = $1`,
+      [taskId, json(f), String(minutes)])
+    await logEvent(taskId, 'error', 'orchestrator', failureEvent(f, { retrying_in_minutes: minutes, try: tries + 1, of: RETRY_MINUTES.length }))
+    return 'queued'
+  }
+  return failTask(taskId, tries ? { ...f, title: `${f.title} Aimelia tried ${tries + 1} times.` } : f)
 }
 
 // ---------------------------------------------------------------- capture
@@ -328,8 +366,8 @@ export async function splitCapture(text: string) {
 /** Atomically move one queued task to processing, so two runs never work the same task. */
 export async function claimNext(): Promise<string | null> {
   const row = await one<{ id: string }>(
-    `UPDATE tasks SET status = 'processing', claimed_at = now()
-     WHERE id = (SELECT id FROM tasks WHERE status = 'queued'
+    `UPDATE tasks SET status = 'processing', claimed_at = now(), retry_at = NULL
+     WHERE id = (SELECT id FROM tasks WHERE status = 'queued' AND (retry_at IS NULL OR retry_at <= now())
                    -- a task waits while its documents are being read
                    AND NOT EXISTS (SELECT 1 FROM task_files f WHERE f.task_id = tasks.id AND f.status = 'reading')
                  ORDER BY ${urgencySql().replace(/\bt\./g, 'tasks.')} DESC, created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -341,16 +379,20 @@ export async function processOne(taskId: string): Promise<void> {
   try {
     await runTask(taskId)
   } catch (e) {
-    await q(`UPDATE tasks SET status = 'failed' WHERE id = $1`, [taskId])
-    await logEvent(taskId, 'error', 'orchestrator', { error: String((e as Error).message || e).slice(0, 2000) })
     console.error('Agent run failed', taskId, e)
+    await handleRunError(taskId, e)
   }
 }
 
-/** A run that died mid-task (function timeout) goes back to the queue. */
+/** A run that died mid-task (function timeout) goes back to the queue; one cut off every time fails with the reason. */
 export async function releaseStale(minutes = 20): Promise<number> {
-  const rows = await q(`UPDATE tasks SET status = 'queued' WHERE status = 'processing' AND claimed_at < now() - ($1 || ' minutes')::interval RETURNING id`, [String(minutes)])
-  return rows.length
+  const stale = await q<{ id: string; auto_retries: number }>(
+    `SELECT id, auto_retries FROM tasks WHERE status = 'processing' AND claimed_at < now() - ($1 || ' minutes')::interval`, [String(minutes)])
+  for (const t of stale) {
+    if ((t.auto_retries ?? 0) >= RETRY_MINUTES.length) await failTask(t.id, explain('out_of_time'))
+    else await q(`UPDATE tasks SET status = 'queued', auto_retries = auto_retries + 1 WHERE id = $1 AND status = 'processing'`, [t.id])
+  }
+  return stale.length
 }
 
 /** Work the queue until it is empty, the limit is hit, or the time budget runs out. */

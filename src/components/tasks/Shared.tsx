@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
-import { api, Task, PRIORITY_LABEL, dueState, fmtDate } from '@/lib/client/todo'
+import { api, Task, PRIORITY_LABEL, dueState, fmtDate, fmtDateTime } from '@/lib/client/todo'
 import { StatusPill, VoiceButton } from './Cards'
 import { attachToTask } from './Documents'
 
@@ -16,7 +16,9 @@ export function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: strin
         <tbody>
           {tasks.map((t) => {
             const due = dueState(t.due_date, t.status)
-            const waiting = [t.open_questions && `${t.open_questions} question${t.open_questions === 1 ? '' : 's'} for you`,
+            const waiting = [t.status === 'failed' && t.failure && `Failed: ${t.failure.title} To fix: ${t.failure.fix}`,
+              t.status === 'queued' && t.retry_at && `Trying again by itself at ${fmtDateTime(t.retry_at).slice(-5)}`,
+              t.open_questions && `${t.open_questions} question${t.open_questions === 1 ? '' : 's'} for you`,
               t.ready_actions && `${t.ready_actions} ready to approve`,
               t.status === 'scheduled' && t.scheduled_for && `parked until ${fmtDate(t.scheduled_for)}`,
               t.kind === 'follow_up' && `checking ${t.follow_up_owner || 'the owner'} delivered`,
