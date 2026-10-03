@@ -172,7 +172,7 @@ function AutomationCard({ pipeline, channels, sources, onSaved }: {
   const [msg, setMsg] = useState<Msg>(null)
   const [testing, setTesting] = useState('')
   useEffect(() => setP(pipeline), [pipeline])
-  const keys: (keyof Pipeline)[] = ['stale_days', 'follow_up_days', 'lessons_in_context', 'brief_enabled', 'brief_time', 'brief_weekends',
+  const keys: (keyof Pipeline)[] = ['stale_days', 'follow_up_days', 'efficiency_enabled', 'efficiency_time', 'lessons_in_context', 'brief_enabled', 'brief_time', 'brief_weekends',
     'work_start', 'work_end', 'focus_minutes', 'use_ws_systems']
   const dirty = keys.some((k) => p[k] !== pipeline[k])
   const set = (k: keyof Pipeline, v: any) => setP({ ...p, [k]: v })
@@ -214,6 +214,14 @@ function AutomationCard({ pipeline, channels, sources, onSaved }: {
             <input type="number" className="num" min={0} max={30} value={p.lessons_in_context} onChange={(e) => set('lessons_in_context', Number(e.target.value))} /></label>
           <label className="fld"><span>Check an approved email or call came back after this many days (0 is off; handovers follow up on their due date)</span>
             <input type="number" className="num" min={0} max={60} value={p.follow_up_days} onChange={(e) => set('follow_up_days', Number(e.target.value))} /></label>
+        </div>
+      </div>
+      <div className="body">
+        <h3 className="cap" style={{ fontWeight: 600, color: 'var(--navy)', margin: '0 0 6px' }}>Efficiency agent</h3>
+        <p className="cap">Checks every question against what you have already told Aimelia before it reaches you, answers what it can, joins repeats across tasks, and once a day finds the questions that keep coming back so you can answer them once for good. What it answered for you is in Questions on Today, to check.</p>
+        <label className="chk"><input type="checkbox" checked={p.efficiency_enabled} onChange={(e) => set('efficiency_enabled', e.target.checked)} />Run the daily sweep</label>
+        <div className="row2">
+          <label className="fld"><span>At (London time, before the morning brief)</span><input type="time" value={p.efficiency_time} onChange={(e) => set('efficiency_time', e.target.value)} /></label>
         </div>
       </div>
       <div className="body">

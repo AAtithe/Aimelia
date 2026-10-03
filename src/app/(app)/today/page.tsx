@@ -6,6 +6,7 @@ import { Shell, useShell } from '@/components/Shell'
 import { ActionItem, FollowUpItem, QuestionItem, StatusPill } from '@/components/tasks/Cards'
 import { CaptureBar, TaskTable } from '@/components/tasks/Shared'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
+import { EfficiencyPanel } from '@/components/tasks/Efficiency'
 import { BackActions, type Project } from '@/components/planner/Projects'
 import { FilterBar, filterQuery, useSettled, NO_FILTERS, type Filters } from '@/components/tasks/Filters'
 import Link from 'next/link'
@@ -164,6 +165,7 @@ export default function Today() {
             ))}
           </div>
 
+          {tab === 'questions' && <EfficiencyPanel onChanged={load} />}
           {tab === 'questions' && (
             <div className="card"><h2>Answer these so the team can finish <span className="hcount">{questions.length}</span></h2>
               {questions.length === 0 ? <div className="emptyrow">{brief.questions.length ? 'No question matches the filter.' : 'No questions for you.'}</div>
