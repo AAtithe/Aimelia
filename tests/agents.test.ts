@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dispatcher, setLaterHook } from '@/lib/router'
 import { todoEndpoints } from '@/lib/agents/api'
 import { setModelTransport, parseJson, LLMError, type ModelCall } from '@/lib/llm'
-import { processQueue, seedDefaults } from '@/lib/agents/orchestrator'
+import { processQueue, releaseStale, seedDefaults } from '@/lib/agents/orchestrator'
+import { classify, explain } from '@/lib/agents/failure'
 import { createDueRoutines, firstDue, nextAfter, nudgeStale, wakeScheduled } from '@/lib/agents/schedule'
 import { lessonsForContext } from '@/lib/agents/lessons'
 import { dueNow } from '@/lib/agents/notify'
@@ -199,14 +200,79 @@ describe('the run loop', () => {
     expect((await req('POST', `/actions/${a.id}/done`)).status).toBe(409)
   })
 
-  it('records a failed run on the task', async () => {
-    use(new Scripted({ worker: [new LLMError('rate limited')] }))
+  it('records a failed run on the task, with why and what to do', async () => {
+    use(new Scripted({ worker: [new LLMError('anthropic claude-sonnet-5: 401 invalid x-api-key')] }))
     const t = await create()
     await processQueue()
     const got = await get(t.id)
     expect(got.status).toBe('failed')
-    expect(got.events.at(-1).content.error).toBe('rate limited')
-    expect((await req('POST', `/tasks/${t.id}/run`)).data.status).toBe('queued')
+    expect(got.events.at(-1).content.error).toBe('anthropic claude-sonnet-5: 401 invalid x-api-key')
+    expect(got.failure).toMatchObject({ code: 'bad_key', retry: false, agent: 'Triage', where: { href: '/settings' } })
+    expect(got.failure.fix).toContain('Settings')
+    const again = (await req('POST', `/tasks/${t.id}/run`)).data
+    expect(again.status).toBe('queued')
+    expect(again.failure).toBeNull()
+  })
+
+  it('tries a passing problem again by itself, then fails with the reason', async () => {
+    const s = use(new Scripted({ worker: [new LLMError('anthropic claude-sonnet-5: 529 overloaded_error')] }))
+    const t = await create()
+    await processQueue()
+    let got = await get(t.id)
+    expect(got.status).toBe('queued')
+    expect(got.retry_at).not.toBeNull()
+    expect(got.failure.code).toBe('busy')
+    // Not picked up again until the wait is over.
+    const before = s.calls.length
+    await processQueue()
+    expect(s.calls.length).toBe(before)
+    for (let i = 0; i < 2; i++) {
+      await q(`UPDATE tasks SET retry_at = now() - interval '1 minute' WHERE id = $1`, [t.id])
+      await processQueue()
+    }
+    got = await get(t.id)
+    expect(got.status).toBe('failed')
+    expect(got.failure.code).toBe('busy')
+    expect(got.failure.title).toContain('tried 3 times')
+  })
+
+  it('recovers when a retry works', async () => {
+    use(new Scripted({ worker: [new LLMError('fetch failed'), { summary: 'v', actions: [action()] }], reviewer: [approve()] }))
+    const t = await create()
+    await processQueue()
+    expect((await get(t.id)).status).toBe('queued')
+    await q(`UPDATE tasks SET retry_at = now() - interval '1 minute' WHERE id = $1`, [t.id])
+    await processQueue()
+    const got = await get(t.id)
+    expect(got.status).toBe('ready')
+    expect(got.retry_at).toBeNull()
+  })
+
+  it('a run cut off every time fails as out of time', async () => {
+    const t = await create()
+    await q(`UPDATE tasks SET status = 'processing', claimed_at = now() - interval '1 hour', auto_retries = 2 WHERE id = $1`, [t.id])
+    expect(await releaseStale()).toBe(1)
+    const got = await get(t.id)
+    expect(got.status).toBe('failed')
+    expect(got.failure.code).toBe('out_of_time')
+  })
+
+  it('sorts errors into reasons Tom can act on', () => {
+    const cases: [string, string][] = [
+      ['ANTHROPIC_API_KEY is not set.', 'no_key'],
+      ['anthropic m: 400 Your credit balance is too low to access the Anthropic API.', 'no_credit'],
+      ['anthropic m: 429 rate_limit_error', 'rate_limit'],
+      ['anthropic m: 404 not_found_error model: claude-old', 'bad_model'],
+      ['anthropic m: 400 prompt is too long: 250000 tokens > 200000 maximum', 'too_long'],
+      ['anthropic m: 500 api_error', 'busy'],
+      ['Request timed out.', 'network'],
+      ['Claude declined to read this.', 'refused'],
+      ['The model did not return valid JSON: hello', 'garbled'],
+      ['No enabled worker agents. Turn one on in Agent team.', 'no_workers'],
+      ['something odd', 'unknown'],
+    ]
+    for (const [msg, code] of cases) expect([msg, classify(new LLMError(msg))]).toEqual([msg, code])
+    expect(explain('bad_model', '', 'Planner').fix).toContain('Planner')
   })
 
   it('works end to end on the placeholder model', async () => {

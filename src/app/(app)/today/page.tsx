@@ -15,7 +15,7 @@ import Link from 'next/link'
 const URGENT_NEXT: Record<string, string> = {
   queued: 'The team starts on it first.', processing: 'The team is on it now.',
   needs_input: 'The team needs your answer: it is at the top of Questions.', ready: 'Ready: approve it now in To approve.',
-  doing: 'Approved: do it now from To do.', due: 'Check it now in Follow-ups.', failed: 'The run failed: open it and run the team again.',
+  doing: 'Approved: do it now from To do.', due: 'Check it now in Follow-ups.', failed: 'The run failed: open it to see why and what to do.',
   scheduled: 'Parked: open it and bring it back if it cannot wait.',
 }
 
@@ -132,7 +132,7 @@ export default function Today() {
                 <div className="item flag" key={t.id}>
                   <div className="o"><StatusPill status={t.status} />{t.urgency?.reason && <span>{t.urgency.reason}</span>}</div>
                   <div className="t">{t.title}</div>
-                  <div className="meta">{URGENT_NEXT[t.status] || 'Open it to see where it is.'}</div>
+                  <div className="meta">{t.status === 'failed' && t.failure ? `${t.failure.title} ${t.failure.fix}` : URGENT_NEXT[t.status] || 'Open it to see where it is.'}</div>
                   <div className="toolbar">
                     <button className="btn primary" onClick={() => setOpenTask(t.id)}>Open</button>
                     <button className="btn" onClick={() => api(`/tasks/${t.id}/urgent`, { method: 'POST', body: { urgent: false } }).then(load).catch((e) => setMsg({ ok: false, text: e.message }))}>Not urgent</button>

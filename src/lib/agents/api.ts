@@ -95,6 +95,7 @@ export function taskOut(t: Row) {
     scheduled_for: t.scheduled_for, follow_up_owner: t.follow_up?.owner ?? null, follow_up_type: t.kind === 'follow_up' ? t.follow_up?.type || 'delegate' : null, closed_at: t.closed_at ? iso(t.closed_at) : null, calendar_event: t.calendar_event ?? null, stale_nudged_at: iso(t.stale_nudged_at),
     source: t.source ?? null, planned_for: t.planned_for ?? null, estimate_minutes: t.estimate_minutes ?? null, project_id: t.project_id ?? null,
     urgent: !!t.urgent, urgent_reason: t.urgent_reason ?? null, urgent_by: t.urgent_by ?? null, urgency: urgencyOf(t as any),
+    failure: t.failure ?? null, retry_at: t.retry_at ? iso(t.retry_at) : null,
   }
 }
 const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status,
@@ -205,7 +206,8 @@ const kickQueue = (limit = 5) => runLater(() => processQueue({ limit }))
 async function requeue(id: string, reason: string, run = true) {
   const t = await getTask(id)
   if (t.status === 'processing') fail(409, 'The agents are already working on this task.')
-  await q(`UPDATE tasks SET status = 'queued' WHERE id = $1`, [id])
+  // Tom running it again starts afresh: the old reason goes, and passing problems get their automatic tries again.
+  await q(`UPDATE tasks SET status = 'queued', failure = NULL, retry_at = NULL, auto_retries = 0 WHERE id = $1`, [id])
   await touch(id)
   await logEvent(id, 'status', 'tom', { status: 'queued', reason })
   if (run) kickQueue()

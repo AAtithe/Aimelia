@@ -24,6 +24,26 @@ check. Routines create recurring work ahead of time; tasks untouched for 14 days
 through Triage; Tom's edits and send-backs become lessons every agent sees. Facts can come from WSCIP and Payroll Command
 Center through a fixed list of read-only lookups.
 
+### When a run fails
+
+A failed task says why and what to do, at the top of the task and in the Failed runs list
+(`src/lib/agents/failure.ts`). Each failure is sorted into a reason, with the fix and a link to the page where it is made:
+
+| Reason | What Tom does |
+|---|---|
+| No AI key, key refused, out of credit | Paste or replace the key in Settings, AI; top up at console.anthropic.com |
+| An agent's model name does not exist | Clear or correct the model for the named agent in Agent team |
+| Brief and documents too long | Take off documents, shorten the brief, or split the task |
+| Claude declined | Reword the brief to say plainly what the work is for |
+| Every worker switched off | Switch one on in Agent team |
+| Repeated questions, or no actions proposed | Add the missing facts or the outcome wanted to the brief |
+| Cut off by the five-minute limit three times | Split the task, take off documents, or lower Max revisions |
+| Anything else | Run again once; if it repeats, send the technical detail to whoever maintains Aimelia |
+
+Passing problems (Claude overloaded, rate limits, a dropped connection, a garbled reply) are not Tom's to fix: the task
+waits in the queue and is tried again by itself two and then ten minutes later. Only if all three tries fail is it marked
+failed, with the reason. Running the team again by hand clears the reason and gives the task its automatic tries back.
+
 ## Today
 
 Today follows the work through: answer, approve, do, check. It has a section for each: Questions, To approve, To do,
