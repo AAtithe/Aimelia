@@ -472,4 +472,22 @@ export const SCHEMA: string[] = [
   // A passing problem is retried by itself: the task waits in the queue until retry_at, auto_retries times at most.
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS retry_at timestamptz`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_retries int NOT NULL DEFAULT 0`,
+  // ---------------------------------------------------------------- tasks worked in stages
+  // Go and ask someone, come back with the answer, then the next stage. The current stage is the first one open.
+  `CREATE TABLE IF NOT EXISTS task_stages (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    position int NOT NULL DEFAULT 0,
+    kind text NOT NULL DEFAULT 'ask',
+    who text NOT NULL DEFAULT '',
+    title text NOT NULL,
+    details text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'open',
+    answer text,
+    added_by text NOT NULL DEFAULT 'tom',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    done_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS task_stages_task_idx ON task_stages (task_id, position)`,
+  `CREATE INDEX IF NOT EXISTS task_stages_open_idx ON task_stages (status) WHERE status = 'open'`,
 ]

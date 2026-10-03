@@ -15,7 +15,7 @@ type Nav = { href: string; label: string; count?: (b: Briefing) => number }
 const GROUPS: [string, Nav[]][] = [
   ['My work', [
     { href: '/chat', label: 'Ask Aimelia' },
-    { href: '/today', label: 'Today', count: (b) => b.questions.length + b.actions.length + (b.to_do?.length || 0) + b.follow_ups.length },
+    { href: '/today', label: 'Today', count: (b) => b.questions.length + (b.stages?.length || 0) + b.actions.length + (b.to_do?.length || 0) + b.follow_ups.length },
     { href: '/planner', label: 'Planner' },
     { href: '/tasks', label: 'All tasks' },
     { href: '/projects', label: 'Projects and ideas', count: (b) => b.due_back?.length ?? 0 },

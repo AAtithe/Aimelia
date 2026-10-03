@@ -113,7 +113,9 @@ function DraftItem({ a, onDone, showTask = true }: ItemProps) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<Msg>(null)
-  const live = a.status === 'proposed'
+  // A decision or note is settled by approving it; the card stays open so Tom can say what comes of it.
+  const [settled, setSettled] = useState(false)
+  const live = a.status === 'proposed' && !settled
   const flagged = a.review_status === 'flagged'
   const d = a.details || {}
   // Only offered once Microsoft 365 is connected; until then, Copy puts the draft on the clipboard.
@@ -182,7 +184,9 @@ function DraftItem({ a, onDone, showTask = true }: ItemProps) {
             </>
           ) : (
             <>
-              <button className="btn primary" disabled={busy} onClick={() => run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: {} }), TO_DO_WORDS[a.kind] ? `Approved. It is in To do: ${TO_DO_WORDS[a.kind].next}.` : 'Approved. Nothing more to do.')}>
+              <button className="btn primary" disabled={busy} onClick={() => TO_DO_WORDS[a.kind]
+                ? run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: {} }), `Approved. It is in To do: ${TO_DO_WORDS[a.kind].next}.`)
+                : run(() => api(`/actions/${a.id}/approve`, { method: 'POST', body: {} }).then(() => setSettled(true)), 'Approved and settled. Anything that follows from it?', false)}>
                 {a.kind === 'delegate' ? 'Approve handover' : 'Approve'}
               </button>
               {canOutlook && (
@@ -209,6 +213,8 @@ function DraftItem({ a, onDone, showTask = true }: ItemProps) {
         </div>
       )}
       <MsgLine msg={msg} />
+      {settled && <NextStep a={{ ...a, status: 'done' }} onDone={onDone} startOpen nothingNext />}
+      {!live && !settled && a.status === 'done' && <NextStep a={a} onDone={onDone} />}
     </div>
   )
 }
@@ -285,6 +291,111 @@ function ToDoItem({ a, onDone, showTask = true }: ItemProps) {
         <button className={`btn ${lines.length && !allTicked ? '' : 'primary'}`} disabled={busy} onClick={() => done(true)}>{w.done}</button>
         {w.noCheck && <button className="btn" disabled={busy} onClick={() => done(false)}>{w.noCheck}</button>}
       </div>
+      <MsgLine msg={msg} />
+      <NextStep a={a} onDone={onDone} />
+    </div>
+  )
+}
+
+/** Wall-clock London date and time as an iCalendar value with no zone, which a phone or Outlook reads as local time. */
+const icsTime = (date: string, time: string) => `${date.replace(/-/g, '')}T${time.replace(':', '')}00`
+const icsText = (s: string) => s.replace(/\\/g, '\\\\').replace(/([,;])/g, '\\$1').replace(/\r?\n/g, '\\n')
+
+function downloadIcs(e: { subject: string; date: string; start: string; end: string; allDay: boolean; location: string; notes: string }) {
+  const next = new Date(Date.parse(`${e.date}T12:00:00Z`) + 86400000).toISOString().slice(0, 10)
+  const end = e.end || `${String(Math.min(Number(e.start.slice(0, 2)) + 1, 23)).padStart(2, '0')}:${e.start.slice(3)}`
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Williams Stanley//Aimelia//EN', 'BEGIN:VEVENT',
+    `UID:${Date.now()}-${Math.random().toString(36).slice(2)}@aimelia`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`,
+    ...(e.allDay ? [`DTSTART;VALUE=DATE:${e.date.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${next.replace(/-/g, '')}`]
+      : [`DTSTART:${icsTime(e.date, e.start)}`, `DTEND:${icsTime(e.date, end)}`]),
+    `SUMMARY:${icsText(e.subject)}`, ...(e.location ? [`LOCATION:${icsText(e.location)}`] : []), `DESCRIPTION:${icsText(e.notes.slice(0, 2000))}`,
+    'END:VEVENT', 'END:VCALENDAR']
+  const url = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/calendar' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${e.subject.replace(/[^\w ]+/g, '').trim().slice(0, 60) || 'event'}.ics`
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/**
+ * What comes of an approved item. Roll it on: the team works the next step on the same task (book the flights the
+ * team worked out), with what was approved in front of it. Add tasks that follow on from it. Put it in the diary.
+ */
+export function NextStep({ a, onDone, startOpen = false, nothingNext = false }: { a: Action; onDone: () => void; startOpen?: boolean; nothingNext?: boolean }) {
+  const outlook = !!useShell().microsoft?.connected
+  const [open, setOpen] = useState(startOpen)
+  const [rollOn, setRollOn] = useState('')
+  const [lines, setLines] = useState('')
+  const [markDone, setMarkDone] = useState(true)
+  const [diary, setDiary] = useState(false)
+  const [ev, setEv] = useState({ subject: a.title.slice(0, 200), date: '', start: '09:00', end: '', allDay: false, location: '' })
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<Msg>(null)
+  const approved = a.status === 'approved'
+  const tasks = lines.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean)
+
+  const save = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await api(`/actions/${a.id}/next`, { method: 'POST', body: { roll_on: rollOn, tasks: tasks.map((title) => ({ title })), done: approved && markDone, follow_up: true } })
+      const n = r.created?.length || 0
+      setMsg({ ok: true, text: [rollOn.trim() && 'Rolled on: the team is working the next step on this task.', n && `${n} task${n === 1 ? '' : 's'} added, each carrying what you approved.`,
+        r.follow_up_on && `Aimelia checks on ${fmtDate(r.follow_up_on)}.`].filter(Boolean).join(' ') })
+      setRollOn(''); setLines('')
+      setTimeout(onDone, 1400)
+    } catch (e: any) { setMsg({ ok: false, text: e.message }) } finally { setBusy(false) }
+  }
+  const book = async () => {
+    setBusy(true); setMsg(null)
+    const e = { ...ev, notes: `${a.title}\n\n${a.content}` }
+    try {
+      if (outlook) {
+        await api(`/actions/${a.id}/diary`, { method: 'POST', body: { subject: e.subject, date: e.date, all_day: e.allDay, location: e.location,
+          ...(e.allDay ? {} : { start: e.start, ...(e.end ? { end: e.end } : {}) }) } })
+        setMsg({ ok: true, text: `In your Outlook calendar on ${fmtDate(e.date)}${e.allDay ? '' : ` at ${e.start}`}.` })
+      } else {
+        downloadIcs(e)
+        setMsg({ ok: true, text: 'Calendar file downloaded: open it to add it to your diary.' })
+      }
+      setDiary(false)
+    } catch (err: any) { setMsg({ ok: false, text: err.message }) } finally { setBusy(false) }
+  }
+
+  if (!open) return (
+    <div className="toolbar"><button className="btn ghost" onClick={() => setOpen(true)}>What next: roll it on, add a task, put it in the diary</button></div>
+  )
+  return (
+    <div className="nextstep">
+      <div className="nextstep-h">What comes of it</div>
+      <label className="fld"><span>Roll it on: the next step for the team on this task</span>
+        <textarea rows={2} value={rollOn} onChange={(e) => setRollOn(e.target.value)} placeholder="Book the flights for those times, economy plus, and draft the hotel booking" /></label>
+      <label className="fld"><span>Or add new tasks that follow on, one per line</span>
+        <textarea rows={2} value={lines} onChange={(e) => setLines(e.target.value)} placeholder={'Arrange airport transfers\nTell Mandy I am away those days'} /></label>
+      {approved && <label className="chk"><input type="checkbox" checked={markDone} onChange={(e) => setMarkDone(e.target.checked)} /> Mark this one done</label>}
+      <div className="toolbar">
+        <button className="btn primary" disabled={busy || (!rollOn.trim() && !tasks.length)} onClick={save}>Save what comes next</button>
+        <button className="btn" disabled={busy} onClick={() => setDiary(!diary)}>{diary ? 'Not the diary' : 'Put it in my diary'}</button>
+        {nothingNext ? <button className="btn" disabled={busy} onClick={onDone}>Nothing follows</button>
+          : <button className="btn" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>}
+      </div>
+      {diary && (
+        <div className="nextstep-diary">
+          <label className="fld"><span>In the diary as</span><input value={ev.subject} onChange={(e) => setEv({ ...ev, subject: e.target.value })} placeholder="Flight BA 117 to New York" /></label>
+          <div className="row2">
+            <label className="fld"><span>Day</span><input type="date" value={ev.date} onChange={(e) => setEv({ ...ev, date: e.target.value })} /></label>
+            {!ev.allDay && <label className="fld"><span>From</span><input type="time" value={ev.start} onChange={(e) => setEv({ ...ev, start: e.target.value })} /></label>}
+            {!ev.allDay && <label className="fld"><span>To (optional)</span><input type="time" value={ev.end} onChange={(e) => setEv({ ...ev, end: e.target.value })} /></label>}
+          </div>
+          <label className="fld"><span>Where (optional)</span><input value={ev.location} onChange={(e) => setEv({ ...ev, location: e.target.value })} placeholder="Heathrow Terminal 5" /></label>
+          <label className="chk"><input type="checkbox" checked={ev.allDay} onChange={(e) => setEv({ ...ev, allDay: e.target.checked })} /> All day</label>
+          <div className="toolbar">
+            <button className="btn primary" disabled={busy || !ev.subject.trim() || !ev.date || (!ev.allDay && !ev.start)} onClick={book}>
+              {outlook ? 'Add to my Outlook calendar' : 'Download for my calendar'}
+            </button>
+          </div>
+        </div>
+      )}
       <MsgLine msg={msg} />
     </div>
   )

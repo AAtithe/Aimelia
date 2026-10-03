@@ -71,7 +71,7 @@ export function recipientProblem(to: string): string | null {
 
 /** The most of each change Ask Aimelia may make in answer to one message. Reads are not limited. */
 export const TURN_LIMITS: Record<string, number> = {
-  draft_email: 3, create_task: 10, update_task: 10, answer_question: 10, add_to_knowledge: 5,
+  draft_email: 3, create_task: 10, update_task: 10, answer_question: 10, record_stage_answer: 10, add_to_knowledge: 5,
   remember: 5, forget: 5, book_focus_time: 2, meeting_brief: 3,
 }
 

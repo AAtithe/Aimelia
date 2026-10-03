@@ -10,7 +10,7 @@ import { addDays, isYmd, londonToday } from '../dates'
 import { runLater, type Endpoint } from '../router'
 import { connection, graph } from '../microsoft'
 import { env } from '../env'
-import { bookFocus, CalendarError } from './calendarBlocks'
+import { addToDiary, bookFocus, CalendarError } from './calendarBlocks'
 import { learningStats, recordLesson } from './lessons'
 import { buildBrief, channels, send } from './notify'
 import { captureLines, getPipeline, logEvent, processQueue, refineCapture, seedDefaults } from './orchestrator'
@@ -28,6 +28,7 @@ import { addMemory } from '../memory/store'
 import { memoryEndpoints } from '../memory/api'
 import { plannerEndpoints } from '../planner/api'
 import { dueBack } from '../planner/projects'
+import { addStages, briefingStageOut, briefingStages, hasOpenStage, MAX_STAGES, settleStage, stageLine, stageOut, stagesOf } from './stages'
 
 // ---------------------------------------------------------------- schemas
 
@@ -78,6 +79,19 @@ const RoutineIn = z.object({ title: z.string().trim().min(1).max(500), notes: z.
   lead_days: z.number().int().min(0).max(30).default(3), enabled: z.boolean().default(true), next_due: ymd.nullable().optional() })
 const RoutinePatch = RoutineIn.partial()
 const LessonPatch = z.object({ active: z.boolean() })
+const StageIn = z.object({ kind: z.enum(['ask', 'do']).default('ask'), who: z.string().trim().max(120).default(''), title: z.string().trim().min(1).max(500),
+  details: z.string().max(2000).default('') }).refine((x) => x.kind === 'do' || !!x.who, { message: 'Say who to ask.', path: ['who'] })
+const StagesIn = z.object({ stages: z.array(StageIn).min(1).max(MAX_STAGES), run_now: z.boolean().default(false) })
+const StagePatch = z.object({ who: z.string().trim().max(120).optional(), title: z.string().trim().min(1).max(500).optional(), details: z.string().max(2000).optional() })
+const StageAnswer = z.object({ answer: z.string().trim().min(1).max(5000) })
+const StageDone = z.object({ outcome: z.string().trim().max(5000).default('') })
+const NextIn = z.object({ roll_on: z.string().trim().max(2000).default(''),
+  tasks: z.array(z.object({ title: z.string().trim().min(1).max(500), notes: z.string().max(5000).default(''), due_date: ymd.nullable().optional() })).max(10).default([]),
+  done: z.boolean().default(true), follow_up: z.boolean().default(true) })
+const DiaryIn = z.object({ subject: z.string().trim().min(1).max(255), date: ymd, start: hhmm.optional(), end: hhmm.optional(), all_day: z.boolean().default(false),
+  location: z.string().trim().max(255).default(''), notes: z.string().max(5000).default('') })
+  .refine((x) => x.all_day || !!x.start, { message: 'Give a start time, or make it all day.', path: ['start'] })
+  .refine((x) => x.all_day || !x.end || !x.start || x.end > x.start, { message: 'The end must be after the start.', path: ['end'] })
 
 // ---------------------------------------------------------------- serialisers
 
@@ -127,8 +141,8 @@ const lessonOut = (l: Row) => ({ id: l.id, source: l.source, action_kind: l.acti
 
 /** Which statuses each view on the task list covers. */
 export const TASK_VIEWS: Record<string, string[] | null> = {
-  open: ['queued', 'processing', 'needs_input', 'ready', 'doing', 'failed', 'scheduled', 'due'],
-  waiting: ['needs_input', 'ready', 'doing', 'due', 'failed'], // waiting on Tom
+  open: ['queued', 'processing', 'needs_input', 'ready', 'doing', 'waiting', 'failed', 'scheduled', 'due'],
+  waiting: ['needs_input', 'ready', 'doing', 'waiting', 'due', 'failed'], // waiting on Tom
   team: ['queued', 'processing'], // with the agents
   parked: ['scheduled'],
   done: ['done'],
@@ -198,7 +212,9 @@ export async function fullTask(id: string) {
     q(`SELECT * FROM events WHERE task_id = $1 ORDER BY created_at`, [id]),
   ])
   const files = await q(`SELECT ${FILE_COLS} FROM task_files WHERE task_id = $1 ORDER BY created_at`, [id])
-  return { ...taskOut(t), questions: questions.map(questionOut), actions: actions.map(actionOut), events: events.map(eventOut), files: files.map(fileOut) }
+  const stages = await stagesOf(id)
+  return { ...taskOut(t), questions: questions.map(questionOut), actions: actions.map(actionOut), events: events.map(eventOut), files: files.map(fileOut),
+    stages: stages.map(stageOut) }
 }
 
 const kickQueue = (limit = 5) => runLater(() => processQueue({ limit }))
@@ -251,9 +267,13 @@ function importReply(saved: Saved, runNow: boolean) {
  */
 export const TO_DO_KINDS = new Set(['email_draft', 'call', 'delegate', 'document', 'checklist'])
 
-/** Nothing left to approve: the task is with Tom to do while approved actions wait, and done when none do. */
+/**
+ * Nothing left to approve: the task is with Tom to do while approved actions wait, on its current stage while a
+ * stage is open (someone to ask), and done when neither is left.
+ */
 async function closeIfSettled(taskId: string) {
-  const r = await one(`UPDATE tasks SET status = CASE WHEN EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'approved') THEN 'doing' ELSE 'done' END
+  const r = await one(`UPDATE tasks SET status = CASE WHEN EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'approved') THEN 'doing'
+             WHEN EXISTS (SELECT 1 FROM task_stages WHERE task_id = $1 AND status = 'open') THEN 'waiting' ELSE 'done' END
            WHERE id = $1 AND status IN ('ready','doing')
            AND NOT EXISTS (SELECT 1 FROM actions WHERE task_id = $1 AND status = 'proposed') RETURNING status`, [taskId])
   if (r?.status === 'done') await logEvent(taskId, 'status', 'aimelia', { status: 'done', reason: 'every action is done' })
@@ -307,7 +327,8 @@ export const todoEndpoints: Endpoint[] = [
     const back = await dueBack()
     const plannedToday = await q(`${TASK_SELECT} WHERE t.planned_for = $1 AND t.status <> 'done' ORDER BY ${urgencySql()} DESC`, [londonToday()])
     const urgent = await q(`${TASK_SELECT} WHERE t.urgent AND t.status <> 'done' ORDER BY ${urgencySql()} DESC, t.urgent_at`)
-    const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, doing: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
+    const stages = await briefingStages(`${urgencySql()} DESC`)
+    const c: Record<string, number> = { queued: 0, processing: 0, needs_input: 0, ready: 0, doing: 0, waiting: 0, failed: 0, done: 0, scheduled: 0, due: 0 }
     for (const r of counts) c[r.status] = r.n
     return {
       generated_at: new Date().toISOString(), counts: c, urgent: urgent.map(taskOut),
@@ -318,6 +339,7 @@ export const todoEndpoints: Endpoint[] = [
       to_do: toDo.map((a) => ({ ...actionOut(a), task_title: a.task_title, task_priority: a.task_priority })),
       providers: availableProviders(), channels: channels(), sources: configuredSources(), memory_questions: memoryQuestions,
       due_back: back.map((p) => ({ id: p.id, kind: p.kind, title: p.title, review_on: p.review_on, notes: p.notes })), planned_today: plannedToday.map(taskOut),
+      stages: stages.map(briefingStageOut),
     }
   }],
 
@@ -600,6 +622,56 @@ export const todoEndpoints: Endpoint[] = [
     return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length }
   }],
 
+  // ---------------------------------------------------------------- stages: go and ask, report back, move on
+  ['POST', '/tasks/:id/stages', async (req, p) => {
+    const b = await body(req, StagesIn)
+    const t = await getTask(p.id)
+    const made = await addStages(t.id, b.stages.map((x) => ({ ...x, who: x.kind === 'ask' ? x.who : '' })), 'tom')
+    if (!made.length) fail(409, `A task holds at most ${MAX_STAGES} stages.`)
+    await touch(t.id)
+    // The team drafts the message for the first open stage, or a closed task opens again on it.
+    if (b.run_now && t.status !== 'processing') await requeue(t.id, `stages added: ${made.map(stageLine).join('; ')}`)
+    else if (t.status === 'done') {
+      await q(`UPDATE tasks SET status = 'waiting' WHERE id = $1`, [t.id])
+      await logEvent(t.id, 'status', 'tom', { status: 'waiting', reason: 'stages added' })
+    }
+    return Response.json(await fullTask(t.id), { status: 201 })
+  }],
+  ['PATCH', '/stages/:id', async (req, p) => {
+    const b = await body(req, StagePatch)
+    const s = (await one(`SELECT * FROM task_stages WHERE id::text = $1`, [p.id])) || fail(404, 'Stage not found.')
+    if (s!.status !== 'open') fail(409, 'That stage is settled.')
+    if (s!.kind === 'ask' && b.who !== undefined && !b.who) fail(422, 'Say who to ask.')
+    await q(`UPDATE task_stages SET who = COALESCE($2, who), title = COALESCE($3, title), details = COALESCE($4, details) WHERE id = $1`,
+      [s!.id, s!.kind === 'ask' ? b.who ?? null : null, b.title ?? null, b.details ?? null])
+    await touch(s!.task_id)
+    return fullTask(s!.task_id)
+  }],
+  ['DELETE', '/stages/:id', async (_r, p) => {
+    const s = (await one(`SELECT * FROM task_stages WHERE id::text = $1`, [p.id])) || fail(404, 'Stage not found.')
+    if (s!.status !== 'open') fail(409, 'That stage is settled; it stays on the record.')
+    await q(`DELETE FROM task_stages WHERE id = $1`, [s!.id])
+    await q(`UPDATE actions SET status = 'superseded' WHERE task_id = $1 AND status = 'proposed' AND details->>'stage_id' = $2`, [s!.task_id, s!.id])
+    await logEvent(s!.task_id, 'stages', 'tom', { removed: stageLine(s!) })
+    await touch(s!.task_id)
+    // Its drafts went with it. With no stage left the team finishes the task; otherwise the task sits on the next one.
+    const st = await taskStatus(s!.task_id)
+    if (st === 'ready' || st === 'waiting') {
+      if (await hasOpenStage(s!.task_id)) await closeIfSettled(s!.task_id)
+      else if (st === 'waiting' || !(await one(`SELECT 1 FROM actions WHERE task_id = $1 AND status = 'proposed' LIMIT 1`, [s!.task_id]))) await requeue(s!.task_id, 'last stage removed')
+    }
+    return fullTask(s!.task_id)
+  }],
+  ['POST', '/stages/:id/answer', async (req, p) => {
+    const b = await body(req, StageAnswer)
+    return stageReply(await finishStage(p.id, 'answered', b.answer))
+  }],
+  ['POST', '/stages/:id/done', async (req, p) => {
+    const b = await body(req, StageDone)
+    return stageReply(await finishStage(p.id, 'done', b.outcome))
+  }],
+  ['POST', '/stages/:id/skip', async (_r, p) => stageReply(await finishStage(p.id, 'skipped', ''))],
+
   ['PATCH', '/actions/:id', async (req, p) => {
     const b = await body(req, ActionPatch)
     const a = (await one(`SELECT a.*, t.title AS task_title FROM actions a JOIN tasks t ON t.id = a.task_id WHERE a.id = $1`, [p.id])) || fail(404, 'Action not found.')
@@ -662,21 +734,56 @@ export const todoEndpoints: Endpoint[] = [
     else await closeIfSettled(task.id)
     return { action: actionOut(a!), task_status: await taskStatus(task.id) }
   }],
-  // Tom has carried it out. An email, call or handover then gets its check, unless he says none is needed.
   ['POST', '/actions/:id/done', async (req, p) => {
     const b = await body(req, Done)
-    const a = (await one(`UPDATE actions SET status = 'done', done_at = now() WHERE id = $1 AND status IN ('approved','proposed') RETURNING *`, [p.id]))
-      || ((await one(`SELECT id FROM actions WHERE id = $1`, [p.id])) ? fail(409, 'That action is already settled.') : fail(404, 'Action not found.'))
+    const r = await markDone(p.id, b.follow_up)
+    return { action: actionOut((await one(`SELECT * FROM actions WHERE id = $1`, [p.id]))!), task_status: await taskStatus(r.taskId), ...r.result }
+  }],
+  /**
+   * What comes next once something is approved or done: roll it on (the team works the next step on the same task,
+   * with what was approved in front of it), add follow-on tasks that carry it as context, or both. The approved
+   * item is marked done at the same time unless Tom says otherwise.
+   */
+  ['POST', '/actions/:id/next', async (req, p) => {
+    const b = await body(req, NextIn)
+    if (!b.roll_on && !b.tasks.length) fail(422, 'Say what comes next: a step for the team, or a new task.')
+    const a = (await one(`SELECT * FROM actions WHERE id = $1`, [p.id])) || fail(404, 'Action not found.')
+    if (a!.status === 'proposed' || a!.status === 'rejected' || a!.status === 'superseded') fail(409, 'Approve it first; what comes next follows from what you approved.')
     const task = await getTask(a!.task_id)
-    await touch(task.id)
-    await logEvent(task.id, 'status', 'tom', { action: a!.title, status: 'done', ...(b.follow_up ? {} : { reason: 'no check needed' }) })
-    const result: Record<string, unknown> = {}
-    if (b.follow_up && FOLLOW_UP_KINDS[a!.kind]) {
-      const follow = await scheduleFollowUp(task, a!, londonToday(), (await getPipeline()).follow_up_days ?? 7)
-      if (follow) result.follow_up_on = follow.scheduled_for
+    if (b.roll_on && task.status === 'processing') fail(409, 'The agents are working on this task. Try again in a moment.')
+    const approved = `${a!.title}\n${String(a!.content || '').slice(0, 3000)}`.trim()
+    const made: Row[] = []
+    for (const n of b.tasks) {
+      const t = (await one(`INSERT INTO tasks (title, notes, priority, due_date, parent_id, project_id, source, last_touched_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'next', now()) RETURNING *`,
+        [n.title, `${n.notes ? `${n.notes}\n\n` : ''}Follows on from "${task.title}". What was approved:\n${approved}`, task.priority, n.due_date ?? null, task.id, task.project_id ?? null]))!
+      await logEvent(t.id, 'status', 'tom', { status: 'queued', reason: `follows on from ${task.title}` })
+      made.push(t)
     }
-    await closeIfSettled(task.id)
-    return { action: actionOut((await one(`SELECT * FROM actions WHERE id = $1`, [p.id]))!), task_status: await taskStatus(task.id), ...result }
+    if (made.length) await logEvent(task.id, 'next', 'tom', { action: a!.title, tasks: made.map((t) => t.title) })
+    // The next step is a stage on the same task, so the task is not closed under it and the team sees what it builds on.
+    if (b.roll_on) await addStages(task.id, [{ kind: 'do', who: '', title: b.roll_on.slice(0, 500), details: `Builds on what Tom approved: ${approved}` }], 'tom')
+    let result: Record<string, unknown> = {}
+    if (b.done && a!.status === 'approved') result = (await markDone(a!.id, b.follow_up)).result
+    await touch(task.id)
+    if (b.roll_on) await requeue(task.id, `rolled on: ${b.roll_on.slice(0, 200)}`, false)
+    if (made.length || b.roll_on) kickQueue()
+    return Response.json({ task: await fullTask(task.id), created: made.map((t) => taskOut({ ...t, open_questions: 0, ready_actions: 0 })), ...result }, { status: 201 })
+  }],
+  // Into Outlook as Tom's own appointment: the flight, the meeting, the deadline that came out of the work.
+  ['POST', '/actions/:id/diary', async (req, p) => {
+    const b = await body(req, DiaryIn)
+    const a = (await one(`SELECT * FROM actions WHERE id = $1`, [p.id])) || fail(404, 'Action not found.')
+    let event
+    try {
+      event = await addToDiary({ ...b, notes: b.notes || `${a!.title}\n\n${String(a!.content || '').slice(0, 3000)}` })
+    } catch (e) {
+      if (e instanceof CalendarError) fail(409, e.message)
+      throw e
+    }
+    await touch(a!.task_id)
+    await logEvent(a!.task_id, 'status', 'tom', { status: 'in the diary', reason: `${b.subject}, ${b.date}${b.all_day ? ' (all day)' : ` ${b.start}${b.end ? ` to ${b.end}` : ''}`}`, action: a!.title })
+    return Response.json({ event }, { status: 201 })
   }],
 
   ['GET', '/agents', async () => teamPayload()],
@@ -761,6 +868,53 @@ export const todoEndpoints: Endpoint[] = [
   ...memoryEndpoints,
   ...plannerEndpoints,
 ]
+
+/** Tom has carried it out. An email, call or handover then gets its check, unless he says none is needed. */
+async function markDone(actionId: string, followUp: boolean) {
+  const a = (await one(`UPDATE actions SET status = 'done', done_at = now() WHERE id = $1 AND status IN ('approved','proposed') RETURNING *`, [actionId]))
+    || ((await one(`SELECT id FROM actions WHERE id = $1`, [actionId])) ? fail(409, 'That action is already settled.') : fail(404, 'Action not found.'))
+  const task = await getTask(a!.task_id)
+  await touch(task.id)
+  await logEvent(task.id, 'status', 'tom', { action: a!.title, status: 'done', ...(followUp ? {} : { reason: 'no check needed' }) })
+  const result: Record<string, unknown> = {}
+  if (followUp && FOLLOW_UP_KINDS[a!.kind]) {
+    const follow = await scheduleFollowUp(task, a!, londonToday(), (await getPipeline()).follow_up_days ?? 7)
+    if (follow) result.follow_up_on = follow.scheduled_for
+  }
+  await closeIfSettled(task.id)
+  return { taskId: task.id as string, result }
+}
+
+/**
+ * Tom reports back on a stage: what they said (an ask), that it is done (a do), or to skip it. The answer is kept
+ * like any answer Tom gives, and the task moves on: back to the team for the next stage, or to finish with the
+ * answers when none is left. A task still waiting on Tom's own answers to the team resumes when those are in.
+ */
+export async function finishStage(stageId: string, outcome: 'answered' | 'done' | 'skipped', text: string, via?: string) {
+  const s = (await one(`SELECT s.*, t.status AS task_status, t.title AS task_title FROM task_stages s JOIN tasks t ON t.id = s.task_id WHERE s.id::text = $1`, [stageId]))
+    || fail(404, 'Stage not found.')
+  if (s!.status !== 'open') fail(409, 'That stage is already settled.')
+  if (s!.task_status === 'processing') fail(409, 'The agents are working on this task. Try again in a moment.')
+  if (outcome === 'answered' && s!.kind !== 'ask') outcome = 'done'
+  const settled = (await settleStage(s!.id, outcome, text))!
+  if (outcome !== 'skipped' && text.trim()) {
+    await keepNote('answer', s!.kind === 'ask' ? `${s!.who} on "${s!.title}": ${text.trim()}` : `${s!.title}: ${text.trim()}`,
+      { task: s!.task_title, stage: stageLine(s!), ...(via ? { via } : {}) }, `stage:${s!.id}`)
+  }
+  await touch(s!.task_id)
+  const next = await one(`SELECT * FROM task_stages WHERE task_id = $1 AND status = 'open' ORDER BY position, created_at LIMIT 1`, [s!.task_id])
+  const t = await getTask(s!.task_id)
+  let resumed = false
+  if (!(t.status === 'needs_input' && t.open_questions > 0)) {
+    await requeue(t.id, next ? `on to the next stage: ${stageLine(next)}` : 'every stage settled: finish the task')
+    resumed = true
+  }
+  return { stage: settled, next, resumed }
+}
+
+async function stageReply(r: Awaited<ReturnType<typeof finishStage>>) {
+  return { stage: stageOut(r.stage), next_stage: r.next ? stageOut(r.next) : null, task_resumed: r.resumed, task: await fullTask(r.stage.task_id) }
+}
 
 /** After Tom settles a question: every task it held counts as touched, and those with nothing left open go back to the team. */
 export async function settle(taskIds: string[], reason: string) {

@@ -8,7 +8,7 @@
  */
 import { addDays, londonToday, type Ymd } from '../dates'
 
-export const WAITING_ON_TOM = ['needs_input', 'ready', 'doing', 'due', 'failed']
+export const WAITING_ON_TOM = ['needs_input', 'ready', 'doing', 'waiting', 'due', 'failed']
 
 /** The score as a SQL expression over tasks aliased t. today is a checked YYYY-MM-DD, so it is safe to inline. */
 export function urgencySql(today: Ymd = londonToday()) {

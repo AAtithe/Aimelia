@@ -65,3 +65,30 @@ export async function bookFocus(o: { title: string; summary: string; minutes: nu
   })
   return { id: event.id as string, start: slot[0], end: slot[1], link: (event.webLink as string) || null }
 }
+
+const nextDay = (ymd: string) => new Date(Date.parse(`${ymd}T12:00:00Z`) + 86400000).toISOString().slice(0, 10)
+const plusHour = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  return h >= 23 ? '23:59' : `${String(h + 1).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/**
+ * An appointment in Tom's calendar that came out of the work: a flight, a meeting, a deadline. Times are London
+ * wall-clock; a timed one with no end runs an hour, an all-day one is shown as free so it does not block the day.
+ */
+export async function addToDiary(o: { subject: string; date: string; start?: string; end?: string; all_day: boolean; location: string; notes: string }) {
+  const tz = env.timezone()
+  const start = o.all_day ? `${o.date}T00:00` : `${o.date}T${o.start}`
+  const end = o.all_day ? `${nextDay(o.date)}T00:00` : `${o.date}T${o.end || plusHour(o.start!)}`
+  const event = await graph('POST', '/me/events', {
+    headers: { Prefer: `outlook.timezone="${tz}"` },
+    body: {
+      subject: o.subject.slice(0, 255),
+      body: { contentType: 'HTML', content: `<p style="white-space:pre-wrap">${esc(o.notes)}</p><p><a href="${esc(env.appUrl())}/tasks">Open in Aimelia</a></p>` },
+      start: { dateTime: `${start}:00`, timeZone: tz }, end: { dateTime: `${end}:00`, timeZone: tz }, isAllDay: o.all_day,
+      ...(o.location ? { location: { displayName: o.location } } : {}),
+      showAs: o.all_day ? 'free' : 'busy', categories: ['Aimelia'], isReminderOn: true, reminderMinutesBeforeStart: o.all_day ? 1080 : 30,
+    },
+  })
+  return { id: event.id as string, start, end, link: (event.webLink as string) || null }
+}
