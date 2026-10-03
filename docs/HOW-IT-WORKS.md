@@ -36,6 +36,24 @@ action on it is done. Marking an email, call or handover done schedules its chec
 date), unless Tom marks it done with no check needed. Approving a decision or a note settles it at once. It opens on the first section with
 something in it; the figures along the top open their section.
 
+### What comes of it: roll it on, add a task, put it in the diary
+
+Approving often settles one thing and starts the next: the team worked out when to fly, and now the flights need
+booking and the trip needs to be in the diary. Every item in To do, every decision or note as Tom approves it, and every
+settled item on a task has What next:
+
+- **Roll it on.** The next step for the team on the same task ("book those flights and put them in my diary"). It is
+  added as a do stage carrying what Tom approved, so the task is not closed under it, and the team works it next with
+  the approved item in front of it. A task already worked in stages takes it after the stages still open.
+- **Add tasks that follow on**, one per line. Each is a new task for the team, with the same priority and project, linked
+  to the task it came from, and its brief says what was approved.
+- **Mark this one done** at the same time (on by default), which schedules the usual check for an email, call or handover.
+- **Put it in my diary.** With Microsoft 365 connected, an appointment in Outlook (`Calendars.ReadWrite`, already granted
+  for focus time): subject, day, time (an hour if no end is given) or all day (shown as free), place, and what was
+  approved in the body, tagged Aimelia. Without it, a calendar file downloads to open on the phone or in Outlook.
+- API: `POST /api/todo/actions/:id/next` (`roll_on`, `tasks`, `done`, `follow_up`) and `POST /api/todo/actions/:id/diary`
+  (`subject`, `date`, `start`, `end`, `all_day`, `location`).
+
 ## Most urgent first, and urgent and vital
 
 `src/lib/agents/urgency.ts`, `src/lib/agents/triage.ts`.
