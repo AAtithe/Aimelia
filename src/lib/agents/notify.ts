@@ -24,6 +24,7 @@ export async function buildBrief() {
   const overdue = (await q(`SELECT count(*)::int AS n FROM tasks WHERE status NOT IN ('done','scheduled') AND due_date < $1`, [londonToday()]))[0].n as number
   const planned = await q(`SELECT title FROM tasks WHERE planned_for = $1 AND status <> 'done' ORDER BY priority, created_at`, [londonToday()])
   const back = await q(`SELECT title, kind FROM projects WHERE status IN ('active', 'someday') AND review_on <= $1 ORDER BY review_on`, [londonToday()])
+  const saved = (await q(`SELECT count(*)::int AS n FROM questions WHERE answered_by = 'aimelia' AND reviewed_at IS NULL AND answered_at > now() - interval '24 hours'`))[0].n as number
   const parts: string[] = []
   if (urgent.length) parts.push(`${urgent.length} urgent and vital`)
   if (questions.length) parts.push(`${plural(questions.length, 'question')} to answer`)
@@ -34,6 +35,7 @@ export async function buildBrief() {
   if (planned.length) parts.push(`${plural(planned.length, 'task')} planned for today`)
   if (back.length) parts.push(`${back.length} back on your desk`)
   const lines = [
+    ...(saved ? [`Aimelia answered ${saved === 1 ? 'a question' : `${saved} questions`} for you from what you said before: check them in Questions.`] : []),
     ...urgent.slice(0, 3).map((x) => `Urgent: ${x.title}${x.urgent_reason ? ` (${x.urgent_reason})` : ''}`),
     ...questions.slice(0, 3).map((x) => `Answer: ${x.question} (${x.title})`),
     ...followUps.slice(0, 3).map((x) => `Follow up: ${x.title}`),
