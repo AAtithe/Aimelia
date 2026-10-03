@@ -5,17 +5,19 @@ import { z } from 'zod'
 import { iso, json, one, q, type Row } from '../db'
 import { body, fail } from '../http'
 import type { Endpoint } from '../router'
-import { availableTools, chatModel, converse, TOOLS, type Turn } from './agent'
+import { AGENTS, availableTools, chatModel, converse, TOOLS, type AgentId, type Turn } from './agent'
+import { listTrips } from './travel'
 import { ACCEPT, MAX_BASE64, MAX_FILES, readChatFile } from './files'
 import { keepNote } from '../memory/store'
 
 const FileIn = z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(1) })
 const Send = z.object({ message: z.string().trim().max(8000).default(''), chat_id: z.string().uuid().nullable().optional(),
+  agent: z.enum(['aimelia', 'calendar', 'travel']).default('aimelia'), // who a new conversation is with; an existing one keeps its own
   files: z.array(FileIn).max(MAX_FILES, `send up to ${MAX_FILES} files at a time`).default([]) })
   .refine((b) => b.message || b.files.length, 'type a message or attach a file')
   .refine((b) => b.files.reduce((n, f) => n + f.data.length, 0) <= MAX_BASE64, 'those files are too big together: keep them under 3 MB')
 
-const chatOut = (c: Row) => ({ id: c.id, title: c.title, created_at: iso(c.created_at), updated_at: iso(c.updated_at) })
+const chatOut = (c: Row) => ({ id: c.id, title: c.title, agent: (c.agent || 'aimelia') as AgentId, created_at: iso(c.created_at), updated_at: iso(c.updated_at) })
 const fileOut = (f: Row) => ({ id: f.id, name: f.name, kind: f.kind, media_type: f.media_type, size: f.size })
 const messageOut = (m: Row, files: Row[] = []) => ({ id: m.id, role: m.role, content: m.content, steps: m.steps || [], created_at: iso(m.created_at),
   files: files.filter((f) => f.message_id === m.id).map(fileOut) })
@@ -26,8 +28,9 @@ async function getChat(id: string) {
 
 export const chatEndpoints: Endpoint[] = [
   ['GET', '/chats', async () => {
-    const tools = await availableTools()
-    return { chats: (await q(`SELECT * FROM chats ORDER BY updated_at DESC LIMIT 50`)).map(chatOut), tools: tools.map((name) => ({ name, does: TOOLS[name].about })), accept: ACCEPT, model: chatModel() }
+    const agents = await Promise.all((Object.keys(AGENTS) as AgentId[]).map(async (id) => ({ id, label: AGENTS[id].label, intro: AGENTS[id].intro,
+      tools: (await availableTools(id)).map((name) => ({ name, does: TOOLS[name].about })) })))
+    return { chats: (await q(`SELECT * FROM chats ORDER BY updated_at DESC LIMIT 50`)).map(chatOut), agents, tools: agents[0].tools, accept: ACCEPT, model: chatModel() }
   }],
   ['GET', '/chats/:id', async (_r, p) => {
     const c = await getChat(p.id)
@@ -41,7 +44,7 @@ export const chatEndpoints: Endpoint[] = [
     const b = await body(req, Send)
     const read = b.files.map((f) => readChatFile(f.name, f.data)) // every file is checked before anything is stored
     const title = (b.message || `Sent ${read.map((f) => f.name).join(', ')}`).replace(/\s+/g, ' ').slice(0, 80)
-    const c = b.chat_id ? await getChat(b.chat_id) : (await one(`INSERT INTO chats (title) VALUES ($1) RETURNING *`, [title]))!
+    const c = b.chat_id ? await getChat(b.chat_id) : (await one(`INSERT INTO chats (title, agent) VALUES ($1, $2) RETURNING *`, [title, b.agent]))!
     // Tom's message and files are kept even if the model then fails, so nothing he sent is lost.
     const mine = (await one(`INSERT INTO chat_messages (chat_id, role, content) VALUES ($1, 'user', $2) RETURNING *`, [c!.id, b.message]))!
     // What Tom tells Ask Aimelia is kept and learned from, like his answers. Short replies ("thanks", "yes") are not.
@@ -57,11 +60,13 @@ export const chatEndpoints: Endpoint[] = [
       q(`SELECT f.message_id, f.name, f.kind, f.media_type, f.data, f.text FROM chat_files f JOIN chat_messages m ON m.id = f.message_id WHERE m.chat_id = $1 ORDER BY f.created_at`, [c!.id]),
     ])
     const turns: Turn[] = rows.map((r) => ({ role: r.role, content: r.content, files: files.filter((f) => f.message_id === r.id) as Turn['files'] }))
-    const { reply, steps } = await converse(turns)
+    const { reply, steps } = await converse(turns, undefined, (c!.agent || 'aimelia') as AgentId)
     const theirs = (await one(`INSERT INTO chat_messages (chat_id, role, content, steps) VALUES ($1, 'assistant', $2, $3) RETURNING *`, [c!.id, reply, json(steps)]))!
     const updated = (await one(`UPDATE chats SET updated_at = now() WHERE id = $1 RETURNING *`, [c!.id]))!
     return Response.json({ chat: chatOut(updated), messages: [messageOut(mine, saved), messageOut(theirs)] }, { status: b.chat_id ? 200 : 201 })
   }],
+  // The travel agent's trips, for the list beside its conversations.
+  ['GET', '/trips', async (req) => ({ trips: await listTrips(new URL(req.url).searchParams.get('all') === 'true') })],
   ['DELETE', '/chats/:id', async (_r, p) => {
     const r = await q(`DELETE FROM chats WHERE id::text = $1 RETURNING id`, [p.id])
     if (!r.length) fail(404, 'Conversation not found.')

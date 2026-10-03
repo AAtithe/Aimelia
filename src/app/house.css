@@ -129,6 +129,11 @@
 .ws .chat-chip img{width:34px;height:34px;object-fit:cover;border-radius:5px}
 .ws .chat-chip .nm{font-weight:600;color:var(--navy);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws .chat-chip .sz{color:var(--muted)}
+.ws .agentpick{margin-bottom:14px}
+.ws .chat-trips{list-style:none;margin:4px 0 0;padding:0;font-size:12.5px}
+.ws .chat-trips li{padding:6px 0;border-bottom:1px solid var(--grey)}
+.ws .chat-trips li:last-child{border-bottom:0}
+.ws .chat-trips .t{font-weight:600;color:var(--navy)}
 .ws .chatfab{position:fixed;right:22px;bottom:22px;z-index:40;box-shadow:var(--shadowUp);border-radius:22px;padding:10px 18px}
 
 /* --- Today: its sections as tabs; the first three figures open theirs --- */

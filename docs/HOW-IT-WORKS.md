@@ -139,9 +139,44 @@ knows (below) the memories Tom set or checked, his standing preferences, and tho
 
 The Microsoft tools are offered only while Microsoft 365 is connected, web search only with the Claude key, and the
 lookups only when WSCIP or PCC is connected. The tools that change things run only when Tom asks for that outcome.
-Nothing is ever sent: email only ever becomes a draft for Tom to send himself. Each reply lists the steps it took.
+Nothing is ever sent: email only ever becomes a draft for Tom to send himself. The one exception is an answer to an invitation
+that Tom asks the calendar agent for. Each reply lists the steps it took.
 
-Photos, PDFs and documents can go with any message: Attach, drag and drop, or paste a screenshot (up to five files,
+### The specialists: the calendar agent and the travel agent
+
+Ask Aimelia is a small team. Tom picks who to talk to at the top of the page (Aimelia, Calendar agent, Travel agent), and
+Aimelia hands calendar and travel work to them herself with `ask_calendar_agent` and `ask_travel_agent`. A specialist runs
+the same loop with its own brief and tools (eight steps), inside the same time budget and the same per-message change limits
+as the message that started it, so handing over never doubles what one message can change. Its steps are listed under
+Aimelia's reply with its name. A conversation keeps the agent it was started with (`chats.agent`).
+
+The calendar agent (`src/lib/chat/calendar.ts`, needs Microsoft 365):
+
+| Tool | What it does |
+|---|---|
+| calendar_view | Any date range up to 31 days: every event with who organised it, who else is in it, Tom's response, location, online or not |
+| review_calendar | The checks, worked out in code: clashes, three hours or more with no break, under 30 minutes between places, outside working hours, no location or link, unanswered and tentative invitations, days with no room left |
+| find_free_time | Free slots of a given length in working hours on weekdays |
+| create_event | An event on Tom's calendar with nobody invited, tagged Aimelia |
+| update_event, cancel_event | Only for events Tom organised with nobody else in them. Anything with other people is refused in code; the agent drafts an email proposing the change instead |
+| respond_to_invite | Accept, tentative or decline when Tom says so. The organiser gets Outlook's usual reply unless Tom says not to tell them. This is the only thing either specialist sends to another person |
+
+It also has meeting briefs, focus time, mailbox search and email drafts.
+
+The travel agent (`src/lib/chat/travel.ts`): Aimelia has no booking or payment account, so it never buys anything and never
+says it has. It finds real times and fares with web search, plans door to door, and keeps the trip (`trips`: where, when,
+why, the itinerary, status idea, planned, requested, booked, done or cancelled, confirmed bookings and the calendar holds).
+
+| Tool | What it does |
+|---|---|
+| save_trip, list_trips | Keep and update trips; record a confirmed booking from its confirmation email |
+| hold_travel_time | Hold each leg in the calendar, nobody invited, tagged Aimelia and Travel |
+| request_booking | Draft the booking request in Outlook to whoever books (an email address only), never sent; the trip moves to requested |
+
+Card and passport numbers are removed before anything is kept in a trip or a booking request. Its trips are listed beside its
+conversations, and at `GET /api/chat/trips`.
+
+: Attach, drag and drop, or paste a screenshot (up to five files,
 about 3 MB together, Vercel's request limit). Photos over about 1 MB, and every iPhone HEIC photo the browser can open,
 are redrawn in the browser as JPEG with the longest side at 1600px, so a phone photo fits. On the server
 (`src/lib/chat/files.ts`) a photo or PDF is recognised by its first bytes, never its name: PNG, JPEG, GIF, WebP and PDF are

@@ -1,7 +1,7 @@
 # Aimelia
 
 Tom Stanley's assistant for Williams, Stanley & Co: a to-do list worked by a team of AI agents (with tasks imported from Microsoft To Do, Word documents,
-meeting notes and Fireflies), Ask Aimelia (a chat agent on Claude Opus 5.5 that reads photos and documents, searches the web, works out figures, drafts in Outlook, manages tasks and remembers what it is told), plus email triage,
+meeting notes and Fireflies), Ask Aimelia (a chat agent on Claude Opus 5.5 that reads photos and documents, searches the web, works out figures, drafts in Outlook, manages tasks and remembers what it is told, with a calendar agent and a travel agent), plus email triage,
 reply drafting, meeting briefs and prep, a knowledge base and a morning push. One Next.js app on Vercel with Neon Postgres,
 in the firm's house style.
 

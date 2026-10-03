@@ -454,4 +454,21 @@ export const SCHEMA: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     applied_at timestamptz
   )`,
+  // Ask Aimelia's specialists: which agent a conversation is with, and the travel agent's trips.
+  `ALTER TABLE chats ADD COLUMN IF NOT EXISTS agent text NOT NULL DEFAULT 'aimelia'`,
+  `CREATE TABLE IF NOT EXISTS trips (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    title text NOT NULL,
+    destination text NOT NULL DEFAULT '',
+    purpose text NOT NULL DEFAULT '',
+    depart_date text,
+    return_date text,
+    status text NOT NULL DEFAULT 'planned',
+    itinerary text NOT NULL DEFAULT '',
+    bookings jsonb NOT NULL DEFAULT '[]'::jsonb,
+    holds jsonb NOT NULL DEFAULT '[]'::jsonb,
+    notes text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ]

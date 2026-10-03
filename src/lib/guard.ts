@@ -73,6 +73,9 @@ export function recipientProblem(to: string): string | null {
 export const TURN_LIMITS: Record<string, number> = {
   draft_email: 3, create_task: 10, update_task: 10, answer_question: 10, add_to_knowledge: 5,
   remember: 5, forget: 5, book_focus_time: 2, meeting_brief: 3,
+  // The calendar and travel agents. Answering invitations is the one that reaches other people, so it is capped like drafts.
+  create_event: 6, update_event: 6, cancel_event: 3, respond_to_invite: 5, save_trip: 5, hold_travel_time: 8, request_booking: 2,
+  ask_calendar_agent: 2, ask_travel_agent: 2,
 }
 
 /** Counts changes within one message; a call past its limit is refused before it runs. */

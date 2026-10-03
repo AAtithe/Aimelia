@@ -12,10 +12,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { chat } from '@/lib/client/todo'
 
-export type Step = { tool: string; args: Record<string, any>; ok: boolean; note: string }
+export type Step = { tool: string; args: Record<string, any>; ok: boolean; note: string; by?: string }
 export type ChatFile = { id: string; name: string; kind: 'image' | 'pdf' | 'text'; media_type: string; size: number }
 export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; steps: Step[]; created_at: string; files?: ChatFile[] }
-export type ChatSummary = { id: string; title: string; updated_at: string }
+export type AgentId = 'aimelia' | 'calendar' | 'travel'
+export type ChatSummary = { id: string; title: string; updated_at: string; agent?: AgentId }
+export const AGENT_LABEL: Record<AgentId, string> = { aimelia: 'Aimelia', calendar: 'Calendar agent', travel: 'Travel agent' }
 type Pending = { name: string; data: string; size: number; preview: string | null }
 
 const STEP_LABEL: Record<string, string> = {
@@ -25,14 +27,39 @@ const STEP_LABEL: Record<string, string> = {
   update_task: 'Updated a task', calculate: 'Worked out the figures', web_search: 'Searched the web', remember: 'Remembered',
   forget: 'Forgot', search_conversations: 'Searched earlier conversations', search_email: 'Searched your mailbox', read_email: 'Read an email',
   draft_email: 'Saved a draft in Outlook (not sent)', meeting_brief: 'Wrote a meeting brief', book_focus_time: 'Booked focus time',
+  search_memory: 'Checked what Aimelia knows', save_for_later: 'Kept for later',
+  ask_calendar_agent: 'Handed it to the calendar agent', ask_travel_agent: 'Handed it to the travel agent',
+  calendar_view: 'Read the calendar', review_calendar: 'Checked the calendar for problems', find_free_time: 'Found free time',
+  create_event: 'Added to the calendar', update_event: 'Changed a calendar event', cancel_event: 'Cancelled a calendar event',
+  respond_to_invite: 'Answered an invitation', save_trip: 'Saved the trip', list_trips: 'Read the trips',
+  hold_travel_time: 'Held travel time in the calendar', request_booking: 'Drafted the booking request in Outlook (not sent)',
 }
 
-export const STARTERS = [
-  'What needs my attention today?',
-  'Anything urgent in my inbox?',
-  'What is in my diary for the next two days?',
-  'Add a task: chase Bentleys for the June payroll sign-off by Friday',
-]
+export const STARTERS: Record<AgentId, string[]> = {
+  aimelia: [
+    'What needs my attention today?',
+    'Anything urgent in my inbox?',
+    'What is in my diary for the next two days?',
+    'Add a task: chase Bentleys for the June payroll sign-off by Friday',
+  ],
+  calendar: [
+    'Check my diary for the next week and flag anything wrong',
+    'Find me two hours this week for the budget review',
+    'Which invitations have I not answered?',
+    'Block Friday afternoon for month-end',
+  ],
+  travel: [
+    'Plan my trip to Manchester for the Bentleys board meeting',
+    'What trips do I have coming up?',
+    'Find me a hotel near the client for next Wednesday night',
+    'Has the booking confirmation for my next trip come in?',
+  ],
+}
+const EMPTY_TEXT: Record<AgentId, string> = {
+  aimelia: 'Ask about your tasks, inbox, diary, the knowledge base or client figures, or tell me what to add to the list. Send photos, PDFs and documents too: a receipt, an HMRC letter, a whiteboard, a set of accounts. I look things up before I answer, and I never send anything.',
+  calendar: 'I check your calendar for clashes, missing breaks, too little travel time and unanswered invitations, find time, and add, move or cancel your own events. Meetings with other people I never move: I draft the email proposing the change for you to send.',
+  travel: 'Tell me where you need to be and when. I plan it door to door with real times and fares, hold the travel time in your diary, keep the trip, and draft the booking request for you to send. I cannot pay or book anything myself.',
+}
 
 const ACCEPT = 'image/*,.png,.jpg,.jpeg,.gif,.webp,.heic,.pdf,.docx,.txt,.md,.csv,.vtt,.srt'
 const MAX_FILES = 5
@@ -41,11 +68,13 @@ const SHRINK_OVER = 900_000
 const LONG_SIDE = 1600
 
 function stepText(s: Step) {
-  const label = STEP_LABEL[s.tool] || s.tool
+  const label = `${s.by ? `${s.by}: ` : ''}${STEP_LABEL[s.tool] || s.tool}`
   const detail = s.tool === 'ws_lookup' ? ` ${s.args.source}.${s.args.tool}` : s.args.query ? `: "${s.args.query}"`
     : s.tool === 'calculate' && s.args.sums ? `: ${Object.keys(s.args.sums).slice(0, 4).join(', ')}`
     : (s.tool === 'create_task' || s.tool === 'add_to_knowledge' || s.tool === 'book_focus_time') && s.args.title ? `: ${s.args.title}`
-    : s.tool === 'remember' && s.args.fact ? `: ${s.args.fact}` : s.tool === 'draft_email' && s.args.subject ? `: ${s.args.subject}` : ''
+    : s.tool === 'remember' && s.args.fact ? `: ${s.args.fact}` : s.tool === 'draft_email' && s.args.subject ? `: ${s.args.subject}`
+    : (s.tool === 'create_event' || s.tool === 'hold_travel_time') && s.args.subject ? `: ${s.args.subject}${s.args.start ? `, ${String(s.args.start).replace('T', ' ')}` : ''}`
+    : s.tool === 'save_trip' && s.args.title ? `: ${s.args.title}` : s.tool === 'respond_to_invite' && s.args.response ? ` (${s.args.response})` : ''
   return `${label}${detail}${s.ok ? '' : ` (${s.note || 'failed'})`}`
 }
 
@@ -91,8 +120,10 @@ function Files({ files }: { files?: ChatFile[] }) {
   )
 }
 
-export function Conversation({ chatId, onChat, compact = false }: { chatId: string | null; onChat: (c: ChatSummary) => void; compact?: boolean }) {
+export function Conversation({ chatId, onChat, compact = false, agent = 'aimelia' }: { chatId: string | null; onChat: (c: ChatSummary) => void; compact?: boolean; agent?: AgentId }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [loadedAgent, setLoadedAgent] = useState<AgentId | null>(null)
+  const who = chatId ? loadedAgent || agent : agent // an open conversation keeps the agent it was started with
   const [text, setText] = useState('')
   const [pending, setPending] = useState<Pending[]>([])
   const [busy, setBusy] = useState(false)
@@ -105,9 +136,9 @@ export function Conversation({ chatId, onChat, compact = false }: { chatId: stri
 
   useEffect(() => {
     setErr('')
-    if (!chatId) { setMessages([]); return }
+    if (!chatId) { setMessages([]); setLoadedAgent(null); return }
     if (sentHere.current === chatId) return // just created by sending from here: the messages are already on screen
-    chat<{ messages: ChatMessage[] }>(`/chats/${chatId}`).then((r) => setMessages(r.messages)).catch((e) => setErr(e.message))
+    chat<{ chat: ChatSummary; messages: ChatMessage[] }>(`/chats/${chatId}`).then((r) => { setMessages(r.messages); setLoadedAgent(r.chat.agent || 'aimelia') }).catch((e) => setErr(e.message))
   }, [chatId])
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [messages, busy])
 
@@ -146,10 +177,11 @@ export function Conversation({ chatId, onChat, compact = false }: { chatId: stri
     setMessages((xs) => [...xs, shown])
     try {
       const r = await chat<{ chat: ChatSummary; messages: ChatMessage[] }>('/chats', { method: 'POST',
-        body: { message: m, chat_id: chatId, files: files.map((f) => ({ name: f.name, data: f.data })) } })
+        body: { message: m, chat_id: chatId, agent: who, files: files.map((f) => ({ name: f.name, data: f.data })) } })
       setMessages((xs) => [...xs.filter((x) => x.id !== shown.id), ...r.messages])
       files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
       sentHere.current = r.chat.id
+      setLoadedAgent(r.chat.agent || who)
       onChat(r.chat)
     } catch (e: any) {
       // Put it all back, so sending again is one click.
@@ -169,19 +201,19 @@ export function Conversation({ chatId, onChat, compact = false }: { chatId: stri
       <div className="chat-log" aria-live="polite">
         {messages.length === 0 && !busy && (
           <div className="chat-empty">
-            <p>Ask about your tasks, inbox, diary, the knowledge base or client figures, or tell me what to add to the list. Send photos, PDFs and documents too: a receipt, an HMRC letter, a whiteboard, a set of accounts. I look things up before I answer, and I never send anything.</p>
-            <div className="chat-starters">{STARTERS.map((s) => <button key={s} className="btn" onClick={() => send(s)}>{s}</button>)}</div>
+            <p>{EMPTY_TEXT[who]}</p>
+            <div className="chat-starters">{STARTERS[who].map((s) => <button key={s} className="btn" onClick={() => send(s)}>{s}</button>)}</div>
           </div>
         )}
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}`}>
-            <div className="who">{m.role === 'user' ? 'You' : 'Aimelia'}</div>
+            <div className="who">{m.role === 'user' ? 'You' : AGENT_LABEL[who]}</div>
             {m.id.startsWith('pending-') && m.files?.length ? <div className="chat-files">{m.files.map((f) => <span key={f.id} className="chat-file">{f.name}</span>)}</div> : <Files files={m.files} />}
             {m.content && <div className="bubble">{m.content}</div>}
             {m.steps.length > 0 && <ul className="chat-steps">{m.steps.map((s, i) => <li key={i} className={s.ok ? '' : 'err'}>{stepText(s)}</li>)}</ul>}
           </div>
         ))}
-        {busy && <div className="chat-msg assistant"><div className="who">Aimelia</div><div className="bubble thinking">{pending.length || messages.at(-1)?.files?.length ? 'Reading it ...' : 'Working on it ...'}</div></div>}
+        {busy && <div className="chat-msg assistant"><div className="who">{AGENT_LABEL[who]}</div><div className="bubble thinking">{pending.length || messages.at(-1)?.files?.length ? 'Reading it ...' : 'Working on it ...'}</div></div>}
         <div ref={end} />
       </div>
       <div className={`msg ${err ? 'err' : ''}`}>{err}</div>
@@ -202,7 +234,7 @@ export function Conversation({ chatId, onChat, compact = false }: { chatId: stri
         <input ref={picker} type="file" multiple accept={ACCEPT} hidden onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
         <button className="btn" onClick={() => picker.current?.click()} disabled={busy || pending.length >= MAX_FILES} title="Photos, PDFs, Word, text, CSV or transcripts, up to 3 MB">Attach</button>
         <textarea className="inp" rows={compact ? 2 : 3} value={text} onChange={(e) => setText(e.target.value)} aria-label="Message"
-          placeholder={dragging ? 'Drop to attach' : 'Ask Aimelia, or drop in a photo or file ... (Enter to send, Shift+Enter for a new line)'}
+          placeholder={dragging ? 'Drop to attach' : `${who === 'aimelia' ? 'Ask Aimelia' : `Ask the ${AGENT_LABEL[who].toLowerCase()}`}, or drop in a photo or file ... (Enter to send, Shift+Enter for a new line)`}
           onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files) } }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(text) } }} />
         <button className="btn primary" disabled={busy || reading || (!text.trim() && !pending.length)} onClick={() => send(text)}>{busy ? 'Working ...' : 'Send'}</button>
