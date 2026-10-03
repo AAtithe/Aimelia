@@ -204,3 +204,68 @@ describe('documents on a task', () => {
     expect(ev).toEqual([{ attached: ['policy.docx'], check_against: 'MLR 2017' }, { read: 'policy.docx', overall: 'needs work' }, { removed: 'policy.docx' }])
   })
 })
+
+describe('files given with an answer to a question', () => {
+  async function asked(title: string, question: string) {
+    replies.worker = [{ summary: 'blocked', actions: null, questions: [{ question, why: '' }] }]
+    replies.reviewer = [approve]
+    const t = (await req('POST', '/tasks', { title, run_now: false })).data
+    await processQueue()
+    const d = (await req('GET', `/tasks/${t.id}`)).data
+    expect(d.status).toBe('needs_input')
+    return { t, qn: d.questions[0] }
+  }
+
+  it('a screenshot and a pasted chat answer the question; Claude reads them for what they show, and the team gets it', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-test'
+    const { t, qn } = await asked('Corrigans tronc sign-off', 'Who signed off the Q3 tronc allocation?')
+    expect((await req('POST', `/questions/${qn.id}/answer`, { answer: '' })).status).toBe(422)
+
+    const r = await req('POST', `/questions/${qn.id}/files`, { files: [
+      { name: 'Screenshot 10.14.png', data: b64(PNG) },
+      { name: 'Claude chat.md', data: b64(Buffer.from('Tom: who approved it?\nClaude: Jo Hart approved the Q3 tronc allocation on 12 September.')) },
+    ] })
+    expect(r.status).toBe(201)
+    expect(r.data.files.map((f: any) => [f.role, f.question_id, f.status])).toEqual([['evidence', qn.id, 'reading'], ['evidence', qn.id, 'reading']])
+    expect((await one(`SELECT status FROM tasks WHERE id = $1`, [t.id]))!.status).toBe('needs_input') // the files wait for the answer
+
+    const a = (await req('POST', `/questions/${qn.id}/answer`, { answer: '' })).data
+    expect(a).toMatchObject({ task_resumed: true, files: 2 })
+    expect(a.question.answer).toBe('(Attached: Screenshot 10.14.png, Claude chat.md)')
+
+    // The team waits for the reads.
+    replies.document = [{ summary: 'A screenshot of the tronc schedule.', answer: 'Jo Hart signed it off on 12 September.', facts: ['Signed off by Jo Hart', '12 September 2026'], open: [] }]
+    await processQueue()
+    expect(calls.filter((c) => c.role === 'worker')).toHaveLength(2) // only the first run, before the answer
+    await readTaskFiles()
+    const read = calls.filter((c) => c.role === 'document')
+    expect(read).toHaveLength(2)
+    expect(read[0].system).toContain('gave this file as part of his answer')
+    expect((read[0].payload as any).question_tom_was_answering).toBe('Who signed off the Q3 tronc allocation?')
+
+    replies.worker = [{ summary: 'done', actions: [{ kind: 'note', title: 'Noted', content: 'Jo Hart', details: {} }] }]
+    await processQueue()
+    const ctx: any = calls.filter((c) => c.role === 'worker').at(-1)!.payload
+    expect(ctx.files_tom_gave_with_his_answers.map((f: any) => [f.name, f.in_answer_to, f.what_it_shows])).toEqual([
+      ['Screenshot 10.14.png', 'Who signed off the Q3 tronc allocation?', 'Jo Hart signed it off on 12 September.'],
+      ['Claude chat.md', 'Who signed off the Q3 tronc allocation?', 'Jo Hart signed it off on 12 September.'],
+    ])
+    expect(ctx.files_tom_gave_with_his_answers[1].full_text).toContain('Jo Hart approved')
+    expect(ctx.documents).toBeUndefined() // not treated as documents to assess
+    const got = (await req('GET', `/tasks/${t.id}`)).data
+    expect(got.files.map((f: any) => f.reading?.facts?.[0])).toEqual(['Signed off by Jo Hart', 'Signed off by Jo Hart'])
+  })
+
+  it('files on a question shared by two tasks go to both, and words and files can be sent together', async () => {
+    const a = await asked('Corrigans year-end pack', 'Who is the FD at Corrigans?')
+    const b = await asked('Corrigans tronc', 'Who is the Corrigans FD?')
+    await q(`UPDATE questions SET status = 'merged', merged_into = $2 WHERE id = $1`, [b.qn.id, a.qn.id])
+    await req('POST', `/questions/${b.qn.id}/files`, { files: [{ name: 'org chart.txt', data: b64(Buffer.from('FD: Jo Hart')) }] })
+    const n = await q(`SELECT task_id FROM task_files WHERE question_id = $1 ORDER BY task_id`, [a.qn.id])
+    expect(n.map((r) => r.task_id).sort()).toEqual([a.t.id, b.t.id].sort())
+    const r = (await req('POST', `/questions/${a.qn.id}/answer`, { answer: 'Jo Hart' })).data
+    expect(r).toMatchObject({ tasks_resumed: 2, files: 1 })
+    expect(r.question.answer).toBe('Jo Hart (Attached: org chart.txt)')
+    expect((await req('POST', `/questions/${a.qn.id}/files`, { files: [{ name: 'x.txt', data: b64(Buffer.from('x')) }] })).status).toBe(409)
+  })
+})

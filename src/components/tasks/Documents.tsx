@@ -19,16 +19,15 @@ async function toBase64(f: File) {
   return btoa(bin)
 }
 
-/** Attach files to a task, in batches under the upload limit. Used here and when a task is first created. */
-export async function attachToTask(taskId: string, files: File[], o: { purpose?: string; keep?: boolean } = {}) {
+/** Send files in batches under the upload limit. */
+async function uploadInBatches(path: string, files: File[], extra: Record<string, unknown>) {
   const big = files.find((f) => f.size > MAX_BYTES)
   if (big) throw new Error(`${big.name} is over 3 MB. Save a smaller copy (without images, or fewer pages) and attach that.`)
   let batch: File[] = []
   let size = 0
   const send = async () => {
     if (!batch.length) return
-    await api(`/tasks/${taskId}/files`, { method: 'POST', body: { files: await Promise.all(batch.map(async (f) => ({ name: f.name, data: await toBase64(f) }))),
-      purpose: o.purpose || '', keep_in_knowledge: !!o.keep } })
+    await api(path, { method: 'POST', body: { files: await Promise.all(batch.map(async (f) => ({ name: f.name, data: await toBase64(f) }))), ...extra } })
     batch = []; size = 0
   }
   for (const f of files) {
@@ -38,6 +37,16 @@ export async function attachToTask(taskId: string, files: File[], o: { purpose?:
   await send()
 }
 
+export const ANSWER_ACCEPT = `${ACCEPT},.json`
+
+/** Files given with an answer to a question: screenshots, documents, transcripts, exported chats. */
+export const attachToQuestion = (questionId: string, files: File[]) => uploadInBatches(`/questions/${questionId}/files`, files, {})
+
+/** Attach files to a task, in batches under the upload limit. Used here and when a task is first created. */
+export async function attachToTask(taskId: string, files: File[], o: { purpose?: string; keep?: boolean } = {}) {
+  return uploadInBatches(`/tasks/${taskId}/files`, files, { purpose: o.purpose || '', keep_in_knowledge: !!o.keep })
+}
+
 function Reading({ f }: { f: TaskFile }) {
   const r = f.reading
   if (!r) return null
@@ -45,6 +54,9 @@ function Reading({ f }: { f: TaskFile }) {
   return (
     <div className="body" style={{ padding: '6px 0 0' }}>
       {r.summary && <p>{r.summary}</p>}
+      {r.answer && <p><b>What it shows:</b> {r.answer}</p>}
+      {!!r.facts?.length && <ul className="log">{r.facts.map((m, i) => <li key={i}>{m}</li>)}</ul>}
+      {!!r.open?.length && (<><div className="meta">Still open</div><ul className="log">{r.open.map((m, i) => <li key={i}>{m}</li>)}</ul></>)}
       {r.findings.length > 0 && <p className="cap">{count('red')} red, {count('amber')} amber, {count('green')} green.</p>}
       {r.findings.length > 0 && (
         <div className="tblwrap"><table>
@@ -104,7 +116,7 @@ export function Documents({ taskId, files, onChanged }: { taskId: string; files:
                 : <span className="pill Done">Read</span>}
               {f.keep && <span className="tag">In the knowledge base</span>}
             </div>
-            {f.purpose && <div className="d">Check against: {f.purpose}</div>}
+            {f.purpose && <div className="d">{f.role === 'evidence' ? 'Given with your answer to: ' : 'Check against: '}{f.purpose}</div>}
             {f.status === 'failed' && <div className="d">{f.error}</div>}
             {f.status === 'reading' && f.error && <div className="d">First try failed ({f.error}); it will be tried once more.</div>}
             {open === f.id && <Reading f={f} />}

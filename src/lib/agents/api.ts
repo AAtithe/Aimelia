@@ -20,7 +20,7 @@ import { fileToText, ImportError, IMPORT_TYPES, isPdf } from './importText'
 import { configuredSources, lookup } from './sources'
 import { keepNote } from '../memory/store'
 import { attachFiles, FILE_COLS, fileOut, readTaskFiles } from './documents'
-import { answerQuestion, BLOCKING, dismissQuestion } from './questions'
+import { answerQuestion, BLOCKING, dismissQuestion, questionTasks } from './questions'
 import { markUrgent } from './triage'
 import { urgencyOf, urgencySql } from './urgency'
 import { memoryEndpoints } from '../memory/api'
@@ -42,7 +42,8 @@ const TaskPatch = z.object({ title: z.string().trim().min(1).max(500).optional()
   due_date: ymd.nullable().optional(), status: z.enum(['done', 'queued']).optional(),
   planned_for: ymd.nullable().optional(), estimate_minutes: z.number().int().min(5).max(2400).nullable().optional(), project_id: z.string().uuid().nullable().optional() })
 const Text = z.object({ text: z.string().trim().min(1) })
-const Answer = z.object({ answer: z.string().trim().min(1) })
+const Answer = z.object({ answer: z.string().trim().default('') })
+const AnswerFiles = z.object({ files: z.array(z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(1) })).min(1).max(5) })
 const ActionPatch = z.object({ title: z.string().optional(), content: z.string().optional(), details: z.record(z.string(), z.any()).optional() })
 const Approve = z.object({ create_outlook_draft: z.boolean().default(false) })
 const Done = z.object({ follow_up: z.boolean().default(true) })
@@ -535,12 +536,30 @@ export const todoEndpoints: Endpoint[] = [
     return { task: taskOut(await getTask(p.id)), event }
   }],
 
+  // Screenshots, documents, transcripts or exported chats given as (part of) an answer. Stored on every task the
+  // question holds, read for what they show, and handed to the team with the answer. Sent before the answer itself.
+  ['POST', '/questions/:id/files', async (req, p) => {
+    const b = await body(req, AnswerFiles)
+    if (b.files.reduce((n, f) => n + f.data.length, 0) > 4_200_000) fail(413, 'Those files are over 3 MB together. Attach them one at a time.')
+    const qt = (await questionTasks(p.id)) || fail(404, 'Question not found.')
+    if (!qt!.tasks.length) fail(409, 'That question has already been dealt with.')
+    const made: Row[] = []
+    for (const taskId of qt!.tasks) made.push(...await attachFiles(taskId, b.files, { purpose: qt!.head.question, questionId: qt!.head.id }))
+    runLater(async () => { await readTaskFiles() })
+    return Response.json({ files: made.filter((f) => f.task_id === qt!.head.task_id).map(fileOut) }, { status: 201 })
+  }],
   ['POST', '/questions/:id/answer', async (req, p) => {
     const b = await body(req, Answer)
-    const r = (await answerQuestion(p.id, b.answer)) || fail(404, 'Question not found.')
-    await keepNote('answer', b.answer, { question: r!.head.question, task: (await one(`SELECT title FROM tasks WHERE id = $1`, [r!.head.task_id]))?.title }, `question:${r!.head.id}`)
+    const qt = (await questionTasks(p.id)) || fail(404, 'Question not found.')
+    const given = await q(`SELECT name FROM task_files WHERE question_id = $1 GROUP BY name ORDER BY min(created_at), name`, [qt!.head.id])
+    if (!b.answer && !given.length) fail(422, 'Write an answer or attach a file.')
+    const answer = [b.answer, given.length ? `(Attached: ${given.map((f) => f.name).join(', ')})` : ''].filter(Boolean).join(' ')
+    const r = (await answerQuestion(p.id, answer)) || fail(404, 'Question not found.')
+    if (b.answer) await keepNote('answer', b.answer, { question: r!.head.question, task: (await one(`SELECT title FROM tasks WHERE id = $1`, [r!.head.task_id]))?.title }, `question:${r!.head.id}`)
     const resumed = await settle(r!.tasks, 'questions answered')
-    return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length }
+    // Files still being read hold the task back (the team waits for them), so read them now and then run the team.
+    if (given.length) runLater(async () => { await readTaskFiles(); await processQueue({ limit: 5 }) })
+    return { question: questionOut(r!.question), task_resumed: resumed.includes(r!.question.task_id), tasks_resumed: resumed.length, files: given.length }
   }],
   ['POST', '/questions/:id/dismiss', async (_r, p) => {
     const r = (await dismissQuestion(p.id)) || fail(404, 'Question not found.')

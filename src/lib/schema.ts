@@ -421,6 +421,9 @@ export const SCHEMA: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS task_files_task_idx ON task_files (task_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS task_files_status_idx ON task_files (status, created_at)`,
+  // A file Tom gave with his answer to a question: read for what it shows, not assessed like a policy.
+  `ALTER TABLE task_files ADD COLUMN IF NOT EXISTS question_id uuid`,
+  `ALTER TABLE task_files ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'document'`,
   // ---------------------------------------------------------------- planner, projects and items to come back to
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS planned_for text`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimate_minutes int`,

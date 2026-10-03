@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useShell } from '@/components/Shell'
+import { ANSWER_ACCEPT, attachToQuestion } from './Documents'
 import { api, Action, Question, Task, KIND_LABEL, STATUS_LABEL, STATUS_PILL, TaskStatus, fmtDate } from '@/lib/client/todo'
 
 export function StatusPill({ status }: { status: TaskStatus }) {
@@ -14,21 +15,39 @@ function MsgLine({ msg }: { msg: Msg }) {
   return <div className={`msg ${msg ? (msg.ok ? 'ok' : 'err') : ''}`}>{msg?.text}</div>
 }
 
+/**
+ * A question from the team. Answer in words, with files (screenshots, documents, transcripts, exported chats), or
+ * both: pick them, drop them on the question, or paste a screenshot straight into the answer box.
+ */
 export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDone: () => void; showTask?: boolean }) {
   const [answer, setAnswer] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<Msg>(null)
+  const add = (list: FileList | File[] | null) => {
+    const picked = Array.from(list || []).map((f, i) => f.name && f.name !== 'image.png' ? f
+      : new File([f], `Screenshot ${new Date().toLocaleTimeString('en-GB').replace(/:/g, '.')}${i ? ` ${i + 1}` : ''}.png`, { type: f.type }))
+    if (picked.length) setFiles((have) => [...have, ...picked].slice(0, 10))
+  }
+  const ready = !!answer.trim() || files.length > 0
 
   const submit = async (dismiss = false) => {
     setBusy(true)
     setMsg(null)
     try {
+      if (!dismiss && files.length) {
+        setMsg({ ok: true, text: `Sending ${files.length} file${files.length === 1 ? '' : 's'} ...` })
+        await attachToQuestion(q.id, files)
+      }
       const res = dismiss
         ? await api(`/questions/${q.id}/dismiss`, { method: 'POST' })
         : await api(`/questions/${q.id}/answer`, { method: 'POST', body: { answer } })
       const n = res.tasks_resumed || 0
+      const withFiles = res.files ? ` Claude reads the file${res.files === 1 ? '' : 's'} first, then the team uses ${res.files === 1 ? 'it' : 'them'}.` : ''
+      setFiles([])
       setMsg({ ok: true, text: dismiss ? (n ? 'Skipped. The team will use its judgement.' : 'Skipped.')
-        : n > 1 ? `Answered. ${n} tasks have gone back to the team.` : res.task_resumed || n ? 'Answered. The team has picked it back up.' : 'Answered. Other questions on this task are still open.' })
+        : (n > 1 ? `Answered. ${n} tasks have gone back to the team.` : res.task_resumed || n ? 'Answered. The team has picked it back up.' : 'Answered. Other questions on this task are still open.') + withFiles })
       setTimeout(onDone, 900)
     } catch (e: any) {
       setMsg({ ok: false, text: e.message })
@@ -38,7 +57,10 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
   }
 
   return (
-    <div className="item">
+    <div className={`item ${dragging ? 'dropping' : ''}`}
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true) } }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); add(e.dataTransfer.files) } }}>
       <div className="o">
         {showTask && <span className="tag">{q.task_title}</span>}
         {(q.also_for || []).map((t) => <span key={t.task_id} className="tag">{t.title}</span>)}
@@ -55,11 +77,21 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
           <div className="toolbar"><button className="btn" disabled={busy} onClick={() => setAnswer(q.suggested_answer!)}>Use this answer</button></div>
         </div>
       )}
-      <textarea className="inp" style={{ marginTop: 8 }} rows={2} placeholder="Your answer" value={answer}
+      <textarea className="inp" style={{ marginTop: 8 }} rows={2} placeholder="Your answer, or paste a chat or transcript. Paste or drop screenshots and files here too." value={answer}
         aria-label="Your answer" onChange={(e) => setAnswer(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && answer.trim()) submit() }} />
+        onPaste={(e) => { const f = Array.from(e.clipboardData.files || []); if (f.length) { e.preventDefault(); add(f) } }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && ready) submit() }} />
+      {files.length > 0 && (
+        <div className="answer-files">
+          {files.map((f, i) => (
+            <span key={i} className="answer-file">{f.name} <span className="cap">{f.size < 1048576 ? `${Math.max(1, Math.round(f.size / 1024))} KB` : `${(f.size / 1048576).toFixed(1)} MB`}</span>
+              <button type="button" className="linkbtn" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}>Remove</button></span>
+          ))}
+        </div>
+      )}
       <div className="toolbar">
-        <button className="btn primary" disabled={busy || !answer.trim()} onClick={() => submit()}>Answer</button>
+        <button className="btn primary" disabled={busy || !ready} onClick={() => submit()}>{files.length && !answer.trim() ? 'Answer with the files' : 'Answer'}</button>
+        <label className="btn">Attach files<input type="file" multiple accept={ANSWER_ACCEPT} hidden onChange={(e) => { add(e.target.files); e.target.value = '' }} /></label>
         <button className="btn" disabled={busy} onClick={() => submit(true)}>Skip, use your judgement</button>
       </div>
       <MsgLine msg={msg} />

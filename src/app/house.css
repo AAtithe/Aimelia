@@ -161,6 +161,12 @@
 .ws tr.urgentrow td:first-child{box-shadow:inset 3px 0 0 var(--red)}
 .ws .urgent-pill{margin-right:6px;vertical-align:1px}
 
+/* --- files given with an answer --- */
+.ws .item.dropping{outline:2px dashed var(--wsblue);outline-offset:-4px;background:var(--hover)}
+.ws .answer-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ws .answer-file{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;font-weight:600;color:var(--navy);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:4px 9px}
+.ws .answer-file .cap{margin:0;font-weight:400}
+
 /* --- To do: an approved action and how to carry it out --- */
 .ws .todo .todo-how{color:var(--navy);font-weight:600;margin-top:4px}
 .ws .todo-steps{list-style:none;margin:8px 0 0;padding:0}
