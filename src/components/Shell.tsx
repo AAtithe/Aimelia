@@ -106,7 +106,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
     <>
       <div className="topbar">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="wslogo" src="/assets/ws-logo.png" alt="Williams, Stanley &amp; Co." width={281} height={19} />
+        <img className="wslogo" src="/brand/ws-wordmark.svg" alt="Williams, Stanley &amp; Co." width={281} height={19} />
         <span className="topbar-app">Aimelia</span>
         {signedIn && (
           <>

@@ -4,7 +4,7 @@
 
 | Area | Where |
 |---|---|
-| Pages (house style) | `src/app/(app)/*`, frame in `src/components/Shell.tsx`; the shared house style is `src/app/ws-house.css`, a stamped copy of AAtithe/house-style (sync it, never edit it), and Aimelia's own styles are `src/app/house.css` |
+| Pages (house style) | `src/app/(app)/*`, frame in `src/components/Shell.tsx`; the shared house style is `src/app/ws-house.css`, a stamped copy of AAtithe/house-style (sync it, never edit it), Aimelia's own styles are `src/app/house.css`, and the logos are `public/brand/`, house-style's `brand/` synced with `--no-readme` and pinned by fingerprint in `tests/house.test.ts` |
 | Agent Tasks API | `/api/todo/*`, `src/lib/agents/api.ts` |
 | Email and meetings API | `/api/mail/*`, `src/lib/email/api.ts` |
 | Ask Aimelia (chat agent) API | `/api/chat/*`, `src/lib/chat/api.ts`, agent loop in `src/lib/chat/agent.ts` |
