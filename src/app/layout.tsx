@@ -5,7 +5,7 @@ import './house.css'
 export const metadata: Metadata = {
   title: 'Aimelia | Williams, Stanley & Co',
   description: "Tom Stanley's assistant: agent tasks, email, meetings and briefings.",
-  icons: { icon: '/assets/favicon.png', apple: '/assets/favicon.png' },
+  icons: { icon: '/brand/ws-icon-256.png', apple: '/brand/ws-icon-256.png' },
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'Aimelia', statusBarStyle: 'default' },
   robots: { index: false, follow: false },

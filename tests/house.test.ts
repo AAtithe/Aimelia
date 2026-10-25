@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
@@ -53,5 +54,41 @@ describe('house style', () => {
       expect(sharedSel.has(s)).toBe(true)
       expect(scoped).not.toContain(s)
     }
+  })
+})
+
+// The logos are the house style's too: public/brand is a copy of house-style's
+// brand/ (1.3.0), synced with --no-readme because Next serves the folder. An
+// edit made here instead of in house-style fails this; after a deliberate sync
+// of a new version, replace these fingerprints with the new files'.
+const BRAND: Record<string, string> = {
+  'ws-icon-256.png': 'a105a2dcdae91b1992af03c09220cf48b8e76bffbe33494f8242e3b70a19e13d',
+  'ws-monogram-reversed.png': 'aa230762141da75e38efef349260eb1cb0d0cee495dfb31ec905bcec6f43874f',
+  'ws-monogram-reversed.svg': 'd8cc5af1f48791dd9799764e10298108cf89d04265db0d44ffdd1e68d04e07c9',
+  'ws-monogram.png': 'bc49defafb39663bfe5111c311b06232f83a5b0beacabc0e8c3ec7df30dd0357',
+  'ws-monogram.svg': 'e22724aa6019373ef77fd9e257e662d15cad10cf81244ef394dbdfe6f51d2d8b',
+  'ws-wordmark-reversed.png': '89eb972ff3a1a17b3c2a9deacad07ff14433db9bec7eb561252b6f73f3cdcbb5',
+  'ws-wordmark-reversed.svg': 'ffa4effe0dfaca0645e12054b3b8c875b5203c8098ab1382392737982aa541f3',
+  'ws-wordmark.png': '72d7c4c74067a3cc7e45e78525527f93cd1f44bce2f75e8f05ce24faac9ea2c8',
+  'ws-wordmark.svg': '8d178bb9c46b51ad129a3cfe1a49a111ca0a6820113d4706317c2684a183b3dd',
+}
+const root = path.join(__dirname, '..')
+
+describe('logos', () => {
+  it('public/brand is house-style\'s logos, unedited', () => {
+    const dir = path.join(root, 'public', 'brand')
+    expect(readdirSync(dir).sort()).toEqual(Object.keys(BRAND).sort())
+    for (const [f, want] of Object.entries(BRAND)) {
+      const got = createHash('sha256').update(readFileSync(path.join(dir, f))).digest('hex')
+      expect(got, f + ' differs from house-style: change it there and sync').toBe(want)
+    }
+  })
+
+  it('every logo or icon the app names exists', () => {
+    const sources = ['src/components/Shell.tsx', 'src/app/layout.tsx', 'public/manifest.webmanifest']
+      .map((f) => readFileSync(path.join(root, f), 'utf8')).join('\n')
+    const named = [...new Set([...sources.matchAll(/["'](\/brand\/[^"']+)["']/g)].map((m) => m[1]))]
+    expect(named.length).toBeGreaterThanOrEqual(2)
+    expect(named.filter((f) => !existsSync(path.join(root, 'public', f)))).toEqual([])
   })
 })
