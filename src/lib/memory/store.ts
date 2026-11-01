@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto'
 import { iso, json, one, q, type Row } from '../db'
 import { runLater } from '../router'
+import { suggestOptions } from '../agents/options'
 import { hasPhone, redactPhones } from '../guard'
 
 export const KINDS = ['fact', 'preference', 'person', 'client', 'process'] as const
@@ -115,18 +116,20 @@ export async function confirmMemory(id: string, source: unknown, actor: Actor) {
   await logChange(m.id, 'confirmed', actor, m, m)
 }
 
-export async function askTom(question: string, why: string, memoryIds: string[], askedBy: Actor) {
+/** Ask Tom about what Aimelia remembers. options are the answers he can pick; when none are given they are suggested. */
+export async function askTom(question: string, why: string, memoryIds: string[], askedBy: Actor, options?: unknown) {
   const text = clip(question, 500)
   if (!text) return null
   // The same question is never asked twice while one is waiting.
   const waiting = await one(`SELECT id FROM memory_questions WHERE status = 'open' AND lower(question) = lower($1)`, [text])
   if (waiting) return null
-  return one(`INSERT INTO memory_questions (question, why, memory_ids, asked_by) VALUES ($1, $2, $3::jsonb, $4) RETURNING *`,
-    [text, clip(why, 500), json(memoryIds), askedBy])
+  const [choices] = await suggestOptions([{ question: text, why, options: Array.isArray(options) ? options : [], context: 'What Aimelia remembers' }])
+  return one(`INSERT INTO memory_questions (question, why, memory_ids, asked_by, options) VALUES ($1, $2, $3::jsonb, $4, $5::jsonb) RETURNING *`,
+    [text, clip(why, 500), json(memoryIds), askedBy, json(choices)])
 }
 
 export const questionOut = (x: Row, byId: Map<string, Row> = new Map()) => ({
-  id: x.id, question: x.question, why: x.why, asked_by: x.asked_by, status: x.status, answer: x.answer, created_at: iso(x.created_at),
+  id: x.id, question: x.question, why: x.why, options: x.options || [], asked_by: x.asked_by, status: x.status, answer: x.answer, created_at: iso(x.created_at),
   memories: ((x.memory_ids || []) as string[]).map((id) => byId.get(id)).filter(Boolean).map((m) => ({ id: m!.id, subject: m!.subject, content: m!.content })),
 })
 

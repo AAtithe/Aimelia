@@ -135,6 +135,12 @@ is unavailable the tasks stay as typed.
   - On Today, Questions shows what it answered for Tom to check: Right, or Not right, ask me, which reopens the question
     and holds the task (dropping any drafts built on the wrong answer) until he answers. The morning push says how many
     it answered overnight.
+- **Answers to pick.** Every question comes with two to four likely answers, most likely first, and Tom can answer
+  with one click (`src/lib/agents/options.ts`). The agents, the question tidy and the memory checks give them with each
+  question; when a model leaves them out, one short call suggests them before the question is saved. Questions asked
+  before this, or reworded without new options, are given them on the next tick, once. Writing an answer still works on
+  every question, and anything typed in the box goes with an option Tom picks as detail. The same applies to the
+  questions on What Aimelia knows.
 - **Answering with files.** An answer can be words, files or both: screenshots (pick them, drop them on the question, or
   paste one straight into the answer box), documents, transcripts, exported or copied chats (with Claude or anyone
   else; paste the text, or attach it as .txt, .md, .json or PDF). The files are stored on every task the question

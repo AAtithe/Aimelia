@@ -112,11 +112,11 @@ export function taskOut(t: Row) {
     failure: t.failure ?? null, retry_at: t.retry_at ? iso(t.retry_at) : null,
   }
 }
-const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, answer: x.answer, status: x.status,
+const questionOut = (x: Row) => ({ id: x.id, task_id: x.task_id, asked_by: x.asked_by, question: x.question, why: x.why, options: x.options || [], answer: x.answer, status: x.status,
   created_at: iso(x.created_at), updated_at: x.updated_at ? iso(x.updated_at) : null, answered_by: x.answered_by ?? null,
   suggested_answer: x.suggested_answer ?? null, suggested_from: x.suggested_from ?? null, also_for: x.also_for ?? [],
   // A merged question reads as the one it was merged into, which is what Tom answers.
-  ...(x.status === 'merged' && x.shared_question ? { question: x.shared_question, why: x.shared_why || x.why, shared_with: { question_id: x.merged_into, task_id: x.shared_task_id, title: x.shared_task } } : {}) })
+  ...(x.status === 'merged' && x.shared_question ? { question: x.shared_question, why: x.shared_why || x.why, options: x.shared_options || [], shared_with: { question_id: x.merged_into, task_id: x.shared_task_id, title: x.shared_task } } : {}) })
 const actionOut = (a: Row) => ({ id: a.id, task_id: a.task_id, kind: a.kind, title: a.title, content: a.content, details: a.details || {}, status: a.status,
   review_status: a.review_status, review_score: a.review_score, review_notes: a.review_notes, user_feedback: a.user_feedback, created_at: iso(a.created_at),
   approved_at: a.approved_at ? iso(a.approved_at) : null, done_at: a.done_at ? iso(a.done_at) : null })
@@ -203,7 +203,7 @@ async function getTask(id: string): Promise<Row> {
 export async function fullTask(id: string) {
   const t = await getTask(id)
   const [questions, actions, events] = await Promise.all([
-    q(`SELECT qn.*, h.question AS shared_question, h.why AS shared_why, h.task_id AS shared_task_id, ht.title AS shared_task,
+    q(`SELECT qn.*, h.question AS shared_question, h.why AS shared_why, h.options AS shared_options, h.task_id AS shared_task_id, ht.title AS shared_task,
       COALESCE((SELECT json_agg(json_build_object('task_id', ct.id, 'title', ct.title) ORDER BY c.created_at) FROM questions c JOIN tasks ct ON ct.id = c.task_id
     WHERE c.merged_into = qn.id AND c.status = 'merged' AND c.task_id <> qn.task_id), '[]'::json) AS also_for
       FROM questions qn LEFT JOIN questions h ON h.id = qn.merged_into LEFT JOIN tasks ht ON ht.id = h.task_id

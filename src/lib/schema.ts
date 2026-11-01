@@ -426,6 +426,9 @@ export const SCHEMA: string[] = [
   `ALTER TABLE task_files ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'document'`,
   // ---------------------------------------------------------------- the efficiency agent
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS reviewed_at timestamptz`, // Tom checked an answer Aimelia gave for him
+  // The answers Tom can pick with one click. NULL: asked before options existed, filled on the next tick.
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS options jsonb`,
+  `ALTER TABLE memory_questions ADD COLUMN IF NOT EXISTS options jsonb`,
   `ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS efficiency_enabled boolean NOT NULL DEFAULT true`,
   `ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS efficiency_time text NOT NULL DEFAULT '06:30'`,
   `CREATE TABLE IF NOT EXISTS efficiency_runs (

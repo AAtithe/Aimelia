@@ -7,11 +7,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, fmtDate, fmtDateTime } from '@/lib/client/todo'
 import { MsgLine, type Msg } from '@/components/mail/common'
+import { AnswerOptions, withDetail } from '@/components/tasks/Cards'
 
 type Source = { note_id?: string; source: string; label: string; quote: string; at: string }
 type Memory = { id: string; kind: string; subject: string; content: string; status: 'active' | 'archived'; pinned: boolean; created_by: string
   sources: Source[]; created_at: string; updated_at: string; confirmed_at: string | null }
-type Question = { id: string; question: string; why: string; asked_by: string; created_at: string; memories: { id: string; subject: string; content: string }[] }
+type Question = { id: string; question: string; why: string; options?: string[]; asked_by: string; created_at: string; memories: { id: string; subject: string; content: string }[] }
 type Review = { status: string; summary: string; counts: Record<string, number>; error: string | null; started_at: string; finished_at: string | null; trigger: string }
 type Data = { memories: Memory[]; counts: { active: number; archived: number }; questions: Question[]; review: Review | null; review_running: boolean
   next_check: string; notes_waiting: number }
@@ -35,7 +36,9 @@ function QuestionCard({ x, onDone }: { x: Question; onDone: () => void }) {
       <div className="t">{x.question}</div>
       {x.why && <div className="d">{x.why}</div>}
       {x.memories.length > 0 && <ul className="log">{x.memories.map((m) => <li key={m.id}><span className="who">{m.subject || 'Memory'}</span> {m.content}</li>)}</ul>}
-      <textarea className="inp" rows={2} value={answer} onChange={(e) => setAnswer(e.target.value)} aria-label="Your answer" placeholder="Your answer, in a line" />
+      <AnswerOptions options={x.options} onPick={(o) => act('answer', { answer: withDetail(o, answer) })} />
+      <textarea className="inp" style={{ marginTop: 8 }} rows={2} value={answer} onChange={(e) => setAnswer(e.target.value)} aria-label="Your answer"
+        placeholder={x.options?.length ? 'Or write your own, in a line. Anything here is added to an option you pick.' : 'Your answer, in a line'} />
       <div className="toolbar">
         <button className="btn primary sm" disabled={!answer.trim()} onClick={() => act('answer', { answer })}>Answer</button>
         <button className="btn sm" onClick={() => act('dismiss')}>Not needed</button>

@@ -16,7 +16,23 @@ function MsgLine({ msg }: { msg: Msg }) {
 }
 
 /**
- * A question from the team. Answer in words, with files (screenshots, documents, transcripts, exported chats), or
+ * The answers Tom can pick with one click. Picking one answers the question; anything typed in the box goes with it
+ * as detail. Free text stays for anything the options do not cover.
+ */
+export function AnswerOptions({ options, busy, onPick }: { options?: string[]; busy?: boolean; onPick: (option: string) => void }) {
+  if (!options?.length) return null
+  return (
+    <div className="answer-options" role="group" aria-label="Pick an answer">
+      {options.map((o) => <button key={o} type="button" className="btn" disabled={busy} onClick={() => onPick(o)}>{o}</button>)}
+    </div>
+  )
+}
+
+/** A picked option with whatever Tom typed added as detail. */
+export const withDetail = (option: string, typed: string) => typed.trim() ? `${option}. ${typed.trim()}` : option
+
+/**
+ * A question from the team. Pick one of the suggested answers, or answer in words, with files (screenshots, documents, transcripts, exported chats), or
  * both: pick them, drop them on the question, or paste a screenshot straight into the answer box.
  */
 export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDone: () => void; showTask?: boolean }) {
@@ -32,7 +48,8 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
   }
   const ready = !!answer.trim() || files.length > 0
 
-  const submit = async (dismiss = false) => {
+  const submit = async (dismiss = false, picked?: string) => {
+    const given = picked ? withDetail(picked, answer) : answer
     setBusy(true)
     setMsg(null)
     try {
@@ -42,7 +59,7 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
       }
       const res = dismiss
         ? await api(`/questions/${q.id}/dismiss`, { method: 'POST' })
-        : await api(`/questions/${q.id}/answer`, { method: 'POST', body: { answer } })
+        : await api(`/questions/${q.id}/answer`, { method: 'POST', body: { answer: given } })
       const n = res.tasks_resumed || 0
       const withFiles = res.files ? ` Claude reads the file${res.files === 1 ? '' : 's'} first, then the team uses ${res.files === 1 ? 'it' : 'them'}.` : ''
       setFiles([])
@@ -77,7 +94,10 @@ export function QuestionItem({ q, onDone, showTask = true }: { q: Question; onDo
           <div className="toolbar"><button className="btn" disabled={busy} onClick={() => setAnswer(q.suggested_answer!)}>Use this answer</button></div>
         </div>
       )}
-      <textarea className="inp" style={{ marginTop: 8 }} rows={2} placeholder="Your answer, or paste a chat or transcript. Paste or drop screenshots and files here too." value={answer}
+      <AnswerOptions options={q.options} busy={busy} onPick={(o) => submit(false, o)} />
+      <textarea className="inp" style={{ marginTop: 8 }} rows={2} value={answer}
+        placeholder={q.options?.length ? 'Or write your own answer. Anything here is added to an option you pick. Paste or drop screenshots and files here too.'
+          : 'Your answer, or paste a chat or transcript. Paste or drop screenshots and files here too.'}
         aria-label="Your answer" onChange={(e) => setAnswer(e.target.value)}
         onPaste={(e) => { const f = Array.from(e.clipboardData.files || []); if (f.length) { e.preventDefault(); add(f) } }}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && ready) submit() }} />

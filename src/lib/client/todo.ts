@@ -34,6 +34,7 @@ export interface Question {
   asked_by: string
   question: string
   why: string
+  options?: string[]
   answer: string | null
   status: 'open' | 'merged' | 'answered' | 'dismissed'
   created_at: string

@@ -218,7 +218,8 @@ function mockReply(call: ModelCall): string {
     case 'worker':
       if (p.can_ask_questions && !task.notes && !(p.answered_questions || []).length) {
         return out({ summary: 'Need more context before starting.', actions: null,
-          questions: [{ question: `What does a good outcome look like for '${task.title}'?`, why: 'The task has no brief, so the goal and constraints are unclear.' }] })
+          questions: [{ question: `What does a good outcome look like for '${task.title}'?`, why: 'The task has no brief, so the goal and constraints are unclear.',
+            options: ['Use your judgement and draft a first version', 'I will add a brief to the task'] }] })
       }
       if ((p.draft_actions || []).length) return out({ summary: 'Placeholder agent kept the existing draft.', actions: null, questions: [] })
       return out({ summary: `Placeholder plan for: ${task.title}`, questions: [],

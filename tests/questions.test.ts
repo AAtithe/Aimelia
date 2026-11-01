@@ -6,6 +6,7 @@ import { processQueue } from '@/lib/agents/orchestrator'
 import { nudgeStale } from '@/lib/agents/schedule'
 import { similarity, tidyQuestions } from '@/lib/agents/questions'
 import { one, q } from '@/lib/db'
+import { cleanOptions, fillMissingOptions } from '@/lib/agents/options'
 import { call } from './helpers'
 
 const api = dispatcher('/api/todo', todoEndpoints)
@@ -146,5 +147,52 @@ describe('questions', () => {
     const [t] = await q(`SELECT id FROM tasks`)
     await q(`INSERT INTO questions (task_id, question) VALUES ($1, 'One?'), ($1, 'Two?')`, [t.id])
     expect(await tidyQuestions()).toMatchObject({ skipped: 'no AI key' })
+  })
+})
+
+describe('every question comes with answers to pick', () => {
+  it('keeps the options an agent gives, tidied', () => {
+    expect(cleanOptions(['Sam Patel', ' sam patel ', 'Other', '', 'Jo Hart', 'Not sure', 'A', 'B', 'C'])).toEqual(['Sam Patel', 'Jo Hart', 'A', 'B'])
+    expect(cleanOptions(['Only one'])).toEqual([])
+    expect(cleanOptions('nope')).toEqual([])
+  })
+
+  it('saves the options the agent gave and shows them to Tom', async () => {
+    replies.worker = [{ summary: 'blocked', actions: null, questions: [{ question: 'Who signs off Bentleys?', why: 'to address it', options: ['Sam Patel, the FD', 'Jo Hart'] }] }]
+    const t = (await req('POST', '/tasks', { title: 'Bentleys accounts', run_now: false })).data
+    await processQueue()
+    expect((await brief()).questions[0].options).toEqual(['Sam Patel, the FD', 'Jo Hart'])
+    expect(calls.some((c) => c.role === 'question_options')).toBe(false)
+    const res = (await req('POST', `/questions/${(await brief()).questions[0].id}/answer`, { answer: 'Sam Patel, the FD' })).data
+    expect(res.task_resumed).toBe(true)
+    expect(await status(t.id)).toBe('queued')
+  })
+
+  it('suggests options when the agent left them out', async () => {
+    replies.question_options = [{ questions: [{ index: 0, options: ['31 March', '31 December'] }] }]
+    const t = await asked('Corrigans year end', 'What is the year end?')
+    expect(t.questions[0].options).toEqual(['31 March', '31 December'])
+    expect(calls.find((c) => c.role === 'question_options')!.payload).toMatchObject({ questions: [{ index: 0, question: 'What is the year end?', about: 'Task: Corrigans year end' }] })
+  })
+
+  it('gives options to questions asked before they existed, once', async () => {
+    const t = await asked('Linen contract', 'Who is the supplier?')
+    await q(`UPDATE questions SET options = NULL`)
+    replies.question_options = [{ questions: [{ index: 0, options: ['Johnsons', 'Elis'] }] }]
+    expect(await fillMissingOptions()).toBe(1)
+    expect((await req('GET', `/tasks/${t.id}`)).data.questions[0].options).toEqual(['Johnsons', 'Elis'])
+    const before = calls.length
+    expect(await fillMissingOptions()).toBe(0)
+    expect(calls.length).toBe(before)
+  })
+
+  it('a reworded question gets new options, or has them suggested again', async () => {
+    const t = await asked('Bentleys audit', 'What year end and which auditor?', 'Which bank?')
+    const [a, b] = t.questions
+    replies.questions = [{ reword: [{ id: a.id, question: 'Which auditor?', options: ['Haysmacintyre', 'Moore Kingston Smith'] }, { id: b.id, question: 'Which bank now?' }] }]
+    await tidyQuestions()
+    const by = Object.fromEntries((await req('GET', `/tasks/${t.id}`)).data.questions.map((x: any) => [x.id, x]))
+    expect(by[a.id].options).toEqual(['Haysmacintyre', 'Moore Kingston Smith'])
+    expect((await one(`SELECT options FROM questions WHERE id = $1`, [b.id]))!.options).toBeNull()
   })
 })
