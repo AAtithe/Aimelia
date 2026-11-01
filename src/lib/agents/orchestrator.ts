@@ -25,6 +25,7 @@ import { documentsForContext } from './documents'
 import { MEMORY_GUIDANCE, memoryForContext } from '../memory/store'
 import { gatherFacts } from './sources'
 import { BLOCKING, recordQuestions, similarity, SAME } from './questions'
+import { cleanOptions } from './options'
 import { earlierAnswers, recordScreened, screenQuestions } from './efficiency'
 import { markUrgent } from './triage'
 import { URGENT_WORDS, urgencySql } from './urgency'
@@ -51,7 +52,7 @@ export type Agent = {
   provider: string; model: string | null; temperature: number; position: number; enabled: boolean; can_ask_questions: boolean
 }
 type Draft = { kind: string; title: string; content: string; details: Record<string, unknown> }
-type AskedQuestion = { question: string; why: string }
+type AskedQuestion = { question: string; why: string; options?: string[] }
 
 // ---------------------------------------------------------------- setup
 
@@ -120,7 +121,7 @@ export function cleanQuestions(raw: unknown): AskedQuestion[] {
   for (const qn of raw) {
     if (typeof qn === 'string' && qn.trim()) out.push({ question: qn.trim(), why: '' })
     else if (qn && typeof qn === 'object' && String((qn as any).question || '').trim()) {
-      out.push({ question: String((qn as any).question).trim(), why: String((qn as any).why || '') })
+      out.push({ question: String((qn as any).question).trim(), why: String((qn as any).why || ''), options: cleanOptions((qn as any).options) })
     }
   }
   return out

@@ -121,7 +121,8 @@ export async function recordScreened(taskId: string, askedBy: string, s: Screene
     await logEvent(taskId, 'answer', 'aimelia', { question: a.question, answer: a.answer, source: a.from || 'what you told Aimelia before', screened: true })
   }
   for (const m of s.merged) {
-    await q(`INSERT INTO questions (task_id, asked_by, question, why, status, merged_into) VALUES ($1, $2, $3, $4, 'merged', $5)`, [taskId, askedBy, m.question, m.why, m.into])
+    await q(`INSERT INTO questions (task_id, asked_by, question, why, status, merged_into, options) VALUES ($1, $2, $3, $4, 'merged', $5, $6::jsonb)`,
+      [taskId, askedBy, m.question, m.why, m.into, JSON.stringify(m.options || [])])
     const lead = await one(`SELECT t.title FROM questions qn JOIN tasks t ON t.id = qn.task_id WHERE qn.id = $1`, [m.into])
     await logEvent(taskId, 'question_update', 'aimelia', { text: `"${m.question}" is already waiting for you on "${lead?.title || 'another task'}": one answer settles both.` })
   }

@@ -2,6 +2,7 @@
 import { getPipeline, processQueue, releaseStale, seedDefaults } from './agents/orchestrator'
 import { createDueRoutines, nudgeStale, wakeScheduled } from './agents/schedule'
 import { tidyQuestions } from './agents/questions'
+import { fillMissingOptions } from './agents/options'
 import { efficiencyDue, runEfficiency } from './agents/efficiency'
 import { maybeSendMorning } from './agents/notify'
 import { runImportJobs } from './agents/imports'
@@ -39,6 +40,8 @@ export async function tick(now: Date = new Date()) {
   await safe('stale', () => nudgeStale(pipeline.stale_days, now))
   // Repeats merged, out-of-date questions reworded, ones Tom has already answered settled; before the agents run, so they pick up what it frees.
   if (Date.now() - started < 120_000) await safe('questions', () => tidyQuestions())
+  // Every question comes with answers Tom can pick: any asked before that, or reworded without them, get them here.
+  if (Date.now() - started < 120_000) await safe('question_options', () => fillMissingOptions())
   // Once a day, before the morning push: the efficiency agent's full sweep and its look for questions that keep coming back.
   if (Date.now() - started < 120_000 && (await efficiencyDue(pipeline, now))) await safe('efficiency', async () => (await runEfficiency('daily', now))?.report)
   // A long read above leaves less of the five minutes for the agents.

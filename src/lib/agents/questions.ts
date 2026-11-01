@@ -16,8 +16,9 @@ import { one, q, type Row } from '../db'
 import { canJudge, completeJson } from '../llm'
 import { memoryForContext } from '../memory/store'
 import { logEvent } from './orchestrator'
+import { cleanOptions, OPTIONS_RULE, suggestOptions } from './options'
 
-export type Asked = { question: string; why: string }
+export type Asked = { question: string; why: string; options?: string[] }
 export const BLOCKING = `('open','merged')`
 
 const STOP = new Set(('a an and are as at be by can could do does for from has have how i if in is it its of on or please ' +
@@ -39,11 +40,15 @@ export const SAME = 0.75
 /** Save what an agent asked, skipping repeats of anything already asked on this task. Returns how many were added. */
 export async function recordQuestions(taskId: string, askedBy: string, asked: Asked[]) {
   const known = (await q(`SELECT question FROM questions WHERE task_id = $1`, [taskId])).map((r) => r.question as string)
+  const fresh: Asked[] = []
+  for (const qn of asked) if (![...known, ...fresh.map((f) => f.question)].some((k) => similarity(k, qn.question) >= SAME)) fresh.push(qn)
+  if (!fresh.length) return 0
+  // Every question reaches Tom with answers he can pick; any the agent left without them are given them here.
+  const title = (await one(`SELECT title FROM tasks WHERE id = $1`, [taskId]))?.title || ''
+  const options = await suggestOptions(fresh.map((f) => ({ ...f, context: `Task: ${title}` })))
   let added = 0
-  for (const qn of asked) {
-    if (known.some((k) => similarity(k, qn.question) >= SAME)) continue
-    await q(`INSERT INTO questions (task_id, asked_by, question, why) VALUES ($1, $2, $3, $4)`, [taskId, askedBy, qn.question, qn.why])
-    known.push(qn.question)
+  for (const [i, qn] of fresh.entries()) {
+    await q(`INSERT INTO questions (task_id, asked_by, question, why, options) VALUES ($1, $2, $3, $4, $5::jsonb)`, [taskId, askedBy, qn.question, qn.why, JSON.stringify(options[i])])
     added++
   }
   return added
@@ -110,9 +115,9 @@ async function promote(fromId: string) {
   const kids = await q(`SELECT id FROM questions WHERE merged_into = $1 AND status = 'merged' ORDER BY created_at`, [fromId])
   if (!kids.length) return
   const lead = kids[0].id
-  const head = await one(`SELECT question, why FROM questions WHERE id = $1`, [fromId])
-  await q(`UPDATE questions SET status = 'open', merged_into = NULL, question = COALESCE($2, question), why = COALESCE($3, why), updated_at = now() WHERE id = $1`,
-    [lead, head?.question ?? null, head?.why ?? null])
+  const head = await one(`SELECT question, why, options FROM questions WHERE id = $1`, [fromId])
+  await q(`UPDATE questions SET status = 'open', merged_into = NULL, question = COALESCE($2, question), why = COALESCE($3, why), options = COALESCE($4::jsonb, options), updated_at = now() WHERE id = $1`,
+    [lead, head?.question ?? null, head?.why ?? null, head?.options ? JSON.stringify(head.options) : null])
   await q(`UPDATE questions SET merged_into = $2 WHERE merged_into = $1 AND status = 'merged'`, [fromId, lead])
 }
 
@@ -159,9 +164,9 @@ You get every open question (with its task), the answers Tom has already given o
 
 Return JSON only:
 {
-  "merge": [{"keep": "id", "merge": ["id", ...], "question": "one question that covers them all", "why": "why it matters"}],
+  "merge": [{"keep": "id", "merge": ["id", ...], "question": "one question that covers them all", "why": "why it matters", "options": ["...", "..."]}],
   "answered": [{"id": "id", "answer": "the answer, in full", "from": "which earlier answer or fact it comes from", "confidence": "high" | "medium"}],
-  "reword": [{"id": "id", "question": "the question as it should now read", "why": "why it matters"}]
+  "reword": [{"id": "id", "question": "the question as it should now read", "why": "why it matters", "options": ["...", "..."]}]
 }
 
 Rules:
@@ -169,11 +174,12 @@ Rules:
 - answered: only when Tom's earlier answers or what Aimelia knows already give the whole answer for this task. Copy the facts; never guess. high means nothing about this task could change the answer. Otherwise medium.
 - reword: only when newer answers have made a question out of date or half answered; ask only what is still missing. Keep it short and specific.
 - Leave anything else alone: an empty list is the usual answer. Never invent questions. Use the ids exactly as given; each id appears at most once across all three lists.
+- A merged or reworded question gets fresh "options" that fit its new wording. ${OPTIONS_RULE}
 - UK English. No em dashes.`
 
 /** What the AI sees; the signature changes whenever a question is added, settled or changed. */
 async function snapshot() {
-  const open = await q(`SELECT qn.id, qn.question, qn.why, qn.asked_by, qn.created_at, qn.updated_at, t.id AS task_id, t.title, t.notes
+  const open = await q(`SELECT qn.id, qn.question, qn.why, qn.options, qn.asked_by, qn.created_at, qn.updated_at, t.id AS task_id, t.title, t.notes
     FROM questions qn JOIN tasks t ON t.id = qn.task_id
     WHERE qn.status = 'open' AND t.status <> 'done' ORDER BY qn.created_at LIMIT 60`)
   const settled = await one(`SELECT count(*)::int AS n, max(answered_at)::text AS last FROM questions WHERE status IN ('answered','dismissed')`)
@@ -201,7 +207,7 @@ export async function tidyQuestions(opts: { force?: boolean } = {}) {
   const reply = await completeJson({
     provider: 'auto', role: 'questions', system: TIDY_PROMPT, maxTokens: 4000, timeoutMs: 90_000,
     payload: {
-      open_questions: open.map((r) => ({ id: r.id, question: r.question, why: r.why, asked_by: r.asked_by, task: { title: r.title, notes: String(r.notes || '').slice(0, 500) } })),
+      open_questions: open.map((r) => ({ id: r.id, question: r.question, why: r.why, options: r.options || [], asked_by: r.asked_by, task: { title: r.title, notes: String(r.notes || '').slice(0, 500) } })),
       tom_already_answered: answers.map((r) => ({ id: r.id, task: r.title, question: r.question, answer: r.answer })),
       what_aimelia_knows: await memoryForContext(open.map((r) => `${r.title} ${r.question}`).join(' '), 20),
     },
@@ -215,7 +221,11 @@ export async function tidyQuestions(opts: { force?: boolean } = {}) {
     if (new Set(ids).size !== ids.length || ids.some((id) => !byId.has(id) || used.has(id)) || ids.length < 2) continue
     const [lead, ...rest] = ids.map((id) => take(id)!)
     const text = String(g.question || '').trim() || lead.question
-    await q(`UPDATE questions SET question = $2, why = $3, updated_at = now() WHERE id = $1`, [lead.id, text, String(g.why || lead.why || '')])
+    // New wording without new answers: the old ones may no longer fit, so they are suggested afresh on the next tick.
+    const fresh = cleanOptions(g.options)
+    const options = fresh.length ? fresh : text === lead.question ? lead.options : null
+    await q(`UPDATE questions SET question = $2, why = $3, options = $4::jsonb, updated_at = now() WHERE id = $1`,
+      [lead.id, text, String(g.why || lead.why || ''), options ? JSON.stringify(options) : null])
     for (const r of rest) {
       await q(`UPDATE questions SET status = 'merged', merged_into = $2, updated_at = now() WHERE id = $1`, [r.id, lead.id])
       await q(`UPDATE questions SET merged_into = $2 WHERE merged_into = $1 AND status = 'merged'`, [r.id, lead.id])
@@ -243,7 +253,9 @@ export async function tidyQuestions(opts: { force?: boolean } = {}) {
     const r = take(w.id)
     const text = String(w.question || '').trim()
     if (!r || !text || text === r.question) continue
-    await q(`UPDATE questions SET question = $2, why = COALESCE(NULLIF($3, ''), why), updated_at = now() WHERE id = $1`, [r.id, text, String(w.why || '')])
+    const options = cleanOptions(w.options)
+    await q(`UPDATE questions SET question = $2, why = COALESCE(NULLIF($3, ''), why), options = $4::jsonb, updated_at = now() WHERE id = $1`,
+      [r.id, text, String(w.why || ''), options.length ? JSON.stringify(options) : null])
     await logEvent(r.task_id, 'question_update', 'aimelia', { text: `Updated the question: was "${r.question}", now "${text}"` })
     report.reworded++
   }

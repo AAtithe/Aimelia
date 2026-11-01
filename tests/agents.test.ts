@@ -132,7 +132,9 @@ describe('the run loop', () => {
     const t = await create()
     await processQueue()
     expect((await get(t.id)).status).toBe('needs_input')
-    expect(s.calls.map((c) => c.agent)).toEqual(['Triage', 'Planner'])
+    expect(s.calls.filter((c) => c.agent).map((c) => c.agent)).toEqual(['Triage', 'Planner'])
+    // The agent gave no options, so they were suggested before the question reached Tom.
+    expect(s.calls.at(-1)!.role).toBe('question_options')
     const brief = (await req('GET', '/briefing')).data
     expect(brief.questions[0].question).toBe('Who is the supplier?')
     s.replies.worker = [{ summary: 'ok', actions: [action()] }]

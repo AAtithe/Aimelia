@@ -48,12 +48,13 @@ export async function applyNoteOps(ops: unknown, note: Row, shown: Row[]) {
       const changed = await changeMemory(m.id, { content: String(o.content || ''), source }, 'capture', String(o.why || ''))
       if (changed) done.updated++
       else if (await askTom(`You told me "${clip(m.content, 200)}". Your note says "${clip(note.text, 200)}". Which is right now?`,
-        String(o.why || 'Your note seems to change something you set yourself.'), [m.id], 'capture')) done.questions++
+        String(o.why || 'Your note seems to change something you set yourself.'), [m.id], 'capture',
+        [`What you told me before: ${clip(m.content, 150)}`, `What your note says: ${clip(note.text, 150)}`])) done.questions++
     } else if (o.op === 'confirm' && byId.has(String(o.id))) {
       await confirmMemory(String(o.id), source, 'capture'); done.confirmed++
     } else if (o.op === 'conflict') {
       const ids = (Array.isArray(o.ids) ? o.ids : []).map(String).filter((id: string) => byId.has(id))
-      if (await askTom(String(o.question || ''), String(o.why || ''), ids, 'capture')) done.questions++
+      if (await askTom(String(o.question || ''), String(o.why || ''), ids, 'capture', o.options)) done.questions++
     }
   }
   return done
@@ -148,7 +149,8 @@ export async function weeklyCheck(trigger: 'weekly' | 'manual' = 'weekly', now: 
       const askInstead = async (ids: string[], what: string, why: string) => {
         if (counts.questions >= MAX_QUESTIONS) return
         const named = ids.map((id) => usable(id)).filter(Boolean).map((m) => `"${clip(m!.content, 160)}"`).join(' and ')
-        if (await askTom(`The weekly check would ${what} ${named}, which you set yourself. Should it?`, why, ids, actor)) counts.questions++
+        if (await askTom(`The weekly check would ${what} ${named}, which you set yourself. Should it?`, why, ids, actor,
+          ['Yes, go ahead', 'No, leave it as it is'])) counts.questions++
       }
       for (const m of Array.isArray(out.merges) ? out.merges : []) {
         const ids = [...new Set((Array.isArray(m?.ids) ? m.ids : []).map(String))].filter((id) => usable(id)) as string[]
@@ -175,7 +177,7 @@ export async function weeklyCheck(trigger: 'weekly' | 'manual' = 'weekly', now: 
       for (const x of Array.isArray(out.questions) ? out.questions : []) {
         if (counts.questions >= MAX_QUESTIONS) break
         const ids = (Array.isArray(x?.memory_ids) ? x.memory_ids : []).map(String).filter((id: string) => usable(id))
-        if (await askTom(String(x?.question || ''), String(x?.why || ''), ids, actor)) counts.questions++
+        if (await askTom(String(x?.question || ''), String(x?.why || ''), ids, actor, x?.options)) counts.questions++
       }
       summary = clip(out.summary, 1500) || 'The check found nothing to change.'
     }

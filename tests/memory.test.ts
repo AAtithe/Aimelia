@@ -131,6 +131,7 @@ describe('learning from notes', () => {
     const d = await memories()
     expect(d.memories[0].content).toBe('Bentleys year end is 31 March.')
     expect(d.questions[0].question).toContain('Which is right now?')
+    expect(d.questions[0].options).toEqual(['What you told me before: Bentleys year end is 31 March.', 'What your note says: Bentleys year end is actually 31 December now'])
   })
 
   it('answering a memory question is itself a note, and the memory is corrected from it', async () => {
